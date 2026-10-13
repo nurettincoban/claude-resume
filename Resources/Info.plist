@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>dev.nurettin.clauderesume</string>
+    <key>CFBundleName</key><string>ClaudeResume</string>
+    <key>CFBundleDisplayName</key><string>ClaudeResume</string>
+    <key>CFBundleExecutable</key><string>ClaudeResume</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>1.0.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+    <key>LSMinimumSystemVersion</key><string>15.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSAppleEventsUsageDescription</key><string>ClaudeResume opens and focuses your Claude Code sessions in iTerm2.</string>
+    <key>NSHumanReadableCopyright</key><string>© 2026 Nurettin Coban. MIT License.</string>
+</dict>
+</plist>

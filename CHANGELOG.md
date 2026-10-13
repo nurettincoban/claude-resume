@@ -1,0 +1,27 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
+[Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+## [1.0.0] - 2026-10-13
+
+### Added
+
+- Menu bar panel listing every Claude Code conversation from `~/.claude/projects`,
+  grouped by date, project or cost.
+- One-click resume in a new iTerm2 tab or window. A running session's existing tab is
+  focused instead. Forking (`--fork-session`) and extra `claude` flags are supported.
+- Live busy/idle status, an **All | Running** filter, and a menu bar dot while Claude is working.
+- Notifications when a turn longer than 20 seconds finishes. Clicking one opens that tab.
+- A preview pane with the recap, last prompt and reply, files changed, links, prompts, cost,
+  tokens and models.
+- Merge request, pull request and artifact chips on rows.
+- Search with loose matching, highlighted matches, and accent- and Turkish-insensitive
+  folding, plus a project filter.
+- Pin, hide and rename (written as a `custom-title` line, like `/rename`).
+- Quit sessions that have been idle for over 1, 3, 7 or 30 days, optionally closing their tabs.
+- API-equivalent cost and token totals per session, subagents included.
+- Global shortcut ⌃⌥R, full keyboard navigation, right-click menu, and launch at login.
