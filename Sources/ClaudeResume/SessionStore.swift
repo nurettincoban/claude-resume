@@ -3,6 +3,7 @@ import Foundation
 import Observation
 
 enum Prefs {
+    static let terminal = "terminal"
     static let placement = "placement"
     static let extraFlags = "extraFlags"
     static let hotKey = "hotKeyEnabled"
@@ -13,13 +14,14 @@ enum Prefs {
     static let hidden = "hiddenSessions"
     static let titles = "titleOverrides"
 
-    static var currentPlacement: ITerm.Placement {
-        ITerm.Placement(rawValue: UserDefaults.standard.string(forKey: placement) ?? "") ?? .tab
+    static var currentPlacement: Terminal.Placement {
+        Terminal.Placement(rawValue: UserDefaults.standard.string(forKey: placement) ?? "") ?? .tab
     }
 
     static func register() {
         UserDefaults.standard.register(defaults: [
-            hotKey: true, notifications: true, placement: ITerm.Placement.tab.rawValue,
+            hotKey: true, notifications: true, placement: Terminal.Placement.tab.rawValue,
+            terminal: Terminal.Kind.iterm.rawValue,
             grouping: Grouping.date.rawValue,
         ])
     }
@@ -201,10 +203,10 @@ final class SessionStore {
         guard UserDefaults.standard.bool(forKey: Prefs.notifications) else { return }
         for (id, duration) in done where duration >= Self.minimumTurn {
             guard let session = sessions.first(where: { $0.id == id }) else { continue }
-            let tty = live[id]?.tty
+            let running = live[id]
             launchQueue.async {
                 // Skip it when that tab is already in front of you.
-                if let tty, ITerm.frontmostTTY() == tty { return }
+                if let running, let terminal = Terminal.id(for: running), Terminal.frontmostID() == terminal { return }
                 DispatchQueue.main.async { Notifier.shared.post(session, duration: duration) }
             }
         }
@@ -415,11 +417,13 @@ final class SessionStore {
         }
     }
 
-    /// Stops the Claude Code processes (the conversations stay saved) and optionally closes their iTerm2 tabs.
+    /// Stops the Claude Code processes and optionally closes their original terminal tabs.
     func quit(_ targets: [Session], closeTabs: Bool) {
-        let processes = targets.compactMap { live[$0.id] }.map { ($0.pid, $0.tty) }
-        guard !processes.isEmpty else { return }
+        let running = targets.compactMap { live[$0.id] }
+        guard !running.isEmpty else { return }
         launchQueue.async {
+            // Resolve terminal identities while the processes still exist, before sending SIGTERM.
+            let processes = running.map { ($0.pid, closeTabs ? Terminal.id(for: $0) : nil) }
             for (pid, _) in processes { kill(pid, SIGTERM) }
             // Give them a moment to exit before closing the tabs they ran in.
             let deadline = Date().addingTimeInterval(4)
@@ -427,8 +431,8 @@ final class SessionStore {
                 Thread.sleep(forTimeInterval: 0.1)
             }
             if closeTabs {
-                for (pid, tty) in processes where !LiveSessions.isAlive(pid) {
-                    if let tty { _ = try? ITerm.close(tty: tty) }
+                for (pid, terminal) in processes where !LiveSessions.isAlive(pid) {
+                    if let terminal { _ = try? Terminal.close(terminal) }
                 }
             }
             DispatchQueue.main.async { self.refresh() }
@@ -437,22 +441,21 @@ final class SessionStore {
 
     // MARK: Actions
 
-    func open(_ session: Session, placement: ITerm.Placement? = nil, fork: Bool = false) {
+    func open(_ session: Session, placement: Terminal.Placement? = nil, fork: Bool = false) {
         error = nil
-        guard ITerm.isInstalled else { error = "iTerm2 isn't installed."; return }
-        guard session.folderExists else {
+        let running = fork ? nil : live[session.id]
+        guard running != nil || session.folderExists else {
             error = "\(session.cwd ?? "The session's folder") no longer exists."
             return
         }
         let placement = placement ?? Prefs.currentPlacement
-        let command = ITerm.resumeCommand(for: session, fork: fork,
+        let command = Terminal.resumeCommand(for: session, fork: fork,
                                           extraFlags: UserDefaults.standard.string(forKey: Prefs.extraFlags) ?? "")
-        let tty = fork ? nil : live[session.id]?.tty
+        let terminal = Terminal.selected()
         onLaunch?()
         launchQueue.async {
             do {
-                if let tty, try ITerm.focus(tty: tty) { return }
-                try ITerm.run(command, placement: placement)
+                try Terminal.open(command, live: running, in: terminal, placement: placement, cwd: session.cwd)
             } catch {
                 let message = error.localizedDescription
                 DispatchQueue.main.async {
@@ -464,7 +467,7 @@ final class SessionStore {
     }
 
     func copyCommand(_ session: Session) {
-        copy(ITerm.resumeCommand(for: session, extraFlags: UserDefaults.standard.string(forKey: Prefs.extraFlags) ?? ""))
+        copy(Terminal.resumeCommand(for: session, extraFlags: UserDefaults.standard.string(forKey: Prefs.extraFlags) ?? ""))
     }
 
     func copy(_ text: String) {

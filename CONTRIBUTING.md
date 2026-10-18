@@ -5,7 +5,7 @@ no dependencies, no network access, and nothing written to your transcripts unle
 
 ## Getting started
 
-Requirements: macOS 15+, Xcode 16+ (or the matching Swift toolchain) and iTerm2.
+Requirements: macOS 15+, Xcode 16+ (or the matching Swift toolchain) and iTerm2 or Ghostty 1.3+.
 
 ```sh
 make test      # run the test suite
@@ -37,6 +37,8 @@ make install   # build the .app, copy it to ~/Applications and launch it
 | `Search.swift` | Folding, scoring and highlight ranges for the search field |
 | `SessionStore.swift` | Observable app state: listing, grouping, pins, hidden sessions, renames, notifications, quitting sessions, actions |
 | `ITerm.swift` | AppleScript for opening, focusing and closing iTerm2 tabs, and shell quoting |
+| `Terminal.swift` | Terminal choice, typed terminal identities and routing existing sessions |
+| `Ghostty.swift` | Native Ghostty automation using its configured shell and bounded launch mappings |
 | `Notifier.swift` | "Claude finished" notifications |
 | `TranscriptWriter.swift` | The one write to a transcript: the `custom-title` line used for renames |
 | `Pricing.swift` | Model names and API list prices for the cost estimate |
@@ -54,6 +56,6 @@ Mention the Claude Code version (`claude --version`) you tested against in the p
 
 ## Reporting bugs
 
-Please include your macOS, Claude Code and iTerm2 versions, how you installed ClaudeResume,
+Please include your macOS, Claude Code and terminal (iTerm2 or Ghostty) versions, how you installed ClaudeResume,
 and any error banner text. Please don't paste transcript contents. They can contain code,
 credentials or other private data.

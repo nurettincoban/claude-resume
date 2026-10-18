@@ -430,7 +430,7 @@ struct SessionMenu: View {
 
     var body: some View {
         let isLive = store.live[session.id] != nil
-        Button(isLive ? "Show in iTerm2" : "Resume in New Tab") { store.open(session, placement: .tab) }
+        Button(isLive ? "Show in Terminal" : "Resume in New Tab") { store.open(session, placement: .tab) }
         Button("Resume in New Window") { store.open(session, placement: .window) }
         Button("Fork Conversation") { store.open(session, fork: true) }
         Divider()
@@ -506,7 +506,8 @@ struct ProjectPicker: View {
 
 struct SettingsMenu: View {
     @Environment(SessionStore.self) private var store
-    @AppStorage(Prefs.placement) private var placement: ITerm.Placement = .tab
+    @AppStorage(Prefs.placement) private var placement: Terminal.Placement = .tab
+    @AppStorage(Prefs.terminal) private var terminal: Terminal.Kind = .iterm
     @AppStorage(Prefs.hotKey) private var hotKey = true
     @AppStorage(Prefs.notifications) private var notifications = true
 
@@ -516,8 +517,11 @@ struct SettingsMenu: View {
             Picker("Group By", selection: $store.grouping) {
                 ForEach(Grouping.allCases) { Text($0.title).tag($0) }
             }
+            Picker("Terminal", selection: $terminal) {
+                ForEach(Terminal.Kind.allCases) { Text($0.title).tag($0) }
+            }
             Picker("Open Sessions In", selection: $placement) {
-                ForEach(ITerm.Placement.allCases) { Text($0.title).tag($0) }
+                ForEach(Terminal.Placement.allCases) { Text($0.title).tag($0) }
             }
             Button("Extra claude Flags…") { Prompts.extraFlags() }
             Divider()
@@ -749,7 +753,7 @@ enum Prompts {
         alert.addButton(withTitle: "Quit")
         alert.addButton(withTitle: "Cancel")
         alert.showsSuppressionButton = true
-        alert.suppressionButton?.title = "Also close their iTerm2 tabs"
+        alert.suppressionButton?.title = "Also close their terminal tabs"
         alert.suppressionButton?.state = .on
         if run(alert) == .alertFirstButtonReturn {
             store.quit(sessions, closeTabs: alert.suppressionButton?.state == .on)

@@ -1,7 +1,7 @@
 import AppKit
 import UserNotifications
 
-/// "Claude finished" notifications. Clicking one opens that session's iTerm2 tab.
+/// "Claude finished" notifications. Clicking one opens that session's terminal tab.
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
 

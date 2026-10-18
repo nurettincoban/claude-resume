@@ -20,6 +20,44 @@ enum LiveSessions {
     static let defaultRoot = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".claude/sessions", isDirectory: true)
 
+    /// Read only specific terminal markers; never log a process's environment.
+    static func processBytes(_ pid: pid_t) -> [UInt8]? {
+        guard pid > 0 else { return nil }
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        // A nil-buffer query reports argv's size only, truncating the environment.
+        var size = Int(sysconf(_SC_ARG_MAX))
+        guard size > 4, size <= 8 * 1024 * 1024 else { return nil }
+        var bytes = [UInt8](repeating: 0, count: size)
+        let status = bytes.withUnsafeMutableBytes { sysctl(&mib, 3, $0.baseAddress, &size, nil, 0) }
+        guard status == 0 else { return nil }
+        return Array(bytes.prefix(size))
+    }
+
+    /// KERN_PROCARGS2 contains argc, executable path, padding, argv, then environment.
+    static func environmentValue(_ name: String, in bytes: [UInt8]) -> String? {
+        guard bytes.count > 4 else { return nil }
+        let argc = bytes.prefix(4).enumerated().reduce(UInt32(0)) { $0 | UInt32($1.element) << ($1.offset * 8) }
+        guard argc > 0, argc < bytes.count else { return nil }
+        var index = 4
+        func skipString() -> Bool {
+            while index < bytes.count, bytes[index] != 0 { index += 1 }
+            guard index < bytes.count else { return false }
+            index += 1
+            return true
+        }
+        guard skipString() else { return nil }
+        while index < bytes.count, bytes[index] == 0 { index += 1 }
+        for _ in 0..<argc { guard skipString() else { return nil } }
+        let prefix = Array((name + "=").utf8)
+        while index < bytes.count, bytes[index] != 0 {
+            let start = index
+            guard skipString() else { return nil }
+            let value = bytes[start..<(index - 1)]
+            if value.starts(with: prefix) { return String(bytes: value.dropFirst(prefix.count), encoding: .utf8) }
+        }
+        return nil
+    }
+
     /// Running sessions keyed by session id. Registry files left behind by crashed processes are ignored.
     static func scan(root: URL = defaultRoot) -> [String: LiveSession] {
         guard let files = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)

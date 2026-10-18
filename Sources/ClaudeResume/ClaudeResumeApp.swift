@@ -350,12 +350,11 @@ enum Debug {
             print("No session matching \(id)"); exit(1)
         }
         do {
-            if let tty = LiveSessions.scan()[session.id]?.tty, try ITerm.focus(tty: tty) {
-                print("Focused running session on \(tty)")
-            } else {
-                try ITerm.run(ITerm.resumeCommand(for: session), placement: Prefs.currentPlacement)
-                print("Resumed \(session.id) in iTerm2")
-            }
+            let running = LiveSessions.scan()[session.id]
+            let terminal = Terminal.selected()
+            try Terminal.open(Terminal.resumeCommand(for: session), live: running, in: terminal,
+                              placement: Prefs.currentPlacement, cwd: session.cwd)
+            print(running == nil ? "Resumed \(session.id) in \(terminal.title)" : "Focused running session \(session.id)")
         } catch {
             print("Failed: \(error.localizedDescription)"); exit(1)
         }

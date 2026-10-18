@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A terminal setting beside **Open Sessions In**, with iTerm2 as the default and Ghostty 1.3+
+  as an optional backend. Ghostty uses its configured shell for new tabs and windows.
+- Focus, close and notification routing to each running session's original terminal,
+  including manually started iTerm2 sessions and app-launched Ghostty sessions.
+
+### Fixed
+
+- Refuse to resume a duplicate process when a running conversation's terminal cannot be found.
+
 ## [1.0.0] - 2026-10-13
 
 ### Added

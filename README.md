@@ -7,7 +7,7 @@
 **Every Claude Code conversation, one click from coming back.**
 
 A native macOS menu bar app that lists your Claude Code sessions, shows which ones are still
-running, and resumes any of them in iTerm2, in the right folder, with one click.
+running, and resumes any of them in iTerm2 or Ghostty, in the right folder, with one click.
 
 ![macOS 15+](https://img.shields.io/badge/macOS-15%2B-black?logo=apple)
 ![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)
@@ -73,13 +73,16 @@ away. Pick one and you're back in it.
 
 ### Get back in
 
-- **One-click resume.** Clicking a row opens a new iTerm2 tab, or window, and runs
+- **One-click resume.** Clicking a row opens a new terminal tab, or window, and runs
   `cd <folder> && claude --resume <id>`.
+  - iTerm2 is the default. Choose Ghostty in **⋯ → Terminal** to use Ghostty 1.3 or later.
+    Ghostty uses your configured shell, including its `PATH` and credentials.
   - If iTerm2 isn't open yet, it uses the window iTerm2 opens at launch, so there's no empty
     extra tab.
-- **Running sessions get focused, not duplicated.** If the session is already open, its existing
-  iTerm2 tab comes to the front. It's matched by the process's terminal, so two Claude Code
-  processes never write to the same conversation.
+- **Running sessions get focused, not duplicated.** iTerm2 tabs are matched by the process's
+  terminal, including sessions you started by hand. Ghostty can focus sessions opened by
+  ClaudeResume. A session in another terminal must be switched to there or quit before resuming.
+  Changing the terminal setting affects new launches; existing sessions keep their own terminal.
 - **Fork** (<kbd>⌥↩</kbd>) continues a conversation as a new one (`--fork-session`).
 - **Extra flags** such as `--model opus` can be added to every resume.
 
@@ -109,7 +112,7 @@ away. Pick one and you're back in it.
 - **Rename** (<kbd>⌘E</kbd>). This writes the same line `/rename` writes, so `claude --resume`
   shows the new name too.
 - **Quit idle sessions.** Stop every session that has waited for input for over a day, three
-  days, a week or a month. You can also close their iTerm2 tabs at the same time. The
+  days, a week or a month. You can also close their terminal tabs at the same time. The
   conversations stay saved, and busy sessions are never touched.
 
 ### Stay out of the way
@@ -150,7 +153,7 @@ macOS asks for two permissions, each the first time it's needed:
 
 | Permission | Asked when | Used for |
 | --- | --- | --- |
-| **Automation → iTerm2** | you first resume a session | opening, focusing and closing iTerm2 tabs |
+| **Automation → iTerm2 / Ghostty** | you first use that terminal | opening, focusing and closing its tabs |
 | **Notifications** | at launch | "Claude finished" notifications (optional) |
 
 No Accessibility, Screen Recording or Full Disk Access permission is needed.
@@ -158,8 +161,9 @@ No Accessibility, Screen Recording or Full Disk Access permission is needed.
 ## Requirements
 
 - macOS 15 Sequoia or later, on Apple silicon or Intel.
-- [iTerm2](https://iterm2.com).
-- [Claude Code](https://claude.com/claude-code), with `claude` on the `PATH` of your iTerm2 shell.
+- [iTerm2](https://iterm2.com) (default), or [Ghostty](https://ghostty.org) 1.3 or later
+  with `macos-applescript` enabled.
+- [Claude Code](https://claude.com/claude-code), with `claude` on the `PATH` of your selected terminal's shell.
 
 ## Keyboard shortcuts
 
@@ -188,6 +192,7 @@ the transcript in Finder, opening links, and quitting a running session.
 Click **⋯** in the panel's footer:
 
 - **Group By**: date, project or cost.
+- **Terminal**: iTerm2 (default) or Ghostty.
 - **Open Sessions In**: a new tab or a new window.
 - **Extra claude Flags**: added to every resume command, for example `--model opus`.
 - **Notify When Claude Finishes**
@@ -210,7 +215,8 @@ ClaudeResume reads what Claude Code already keeps on disk:
 | Tokens, cost | `usage` blocks in the session and its `subagents/` transcripts, priced in `Pricing.swift` |
 | Running sessions, busy or idle | `~/.claude/sessions/<pid>.json`, checked every 3 seconds |
 | A session's iTerm2 tab | the process's terminal (`sysctl`), matched against each iTerm2 session's `tty` |
-| Opening, focusing, closing tabs | AppleScript to iTerm2 |
+| An app-launched Ghostty terminal | an inherited launch marker, mapped to Ghostty's surface ID |
+| Opening, focusing, closing tabs | native AppleScript to the session's terminal |
 
 Transcripts can be hundreds of megabytes, mostly tool output. The parser never decodes a whole
 transcript:
@@ -236,7 +242,7 @@ a subscription, read it as what the session would have cost through the API, not
   - Renaming a stopped session appends one `custom-title` line to its transcript, exactly like
     `/rename`.
   - Quitting a session sends its Claude Code process `SIGTERM`. If you asked for it, it then
-    closes the iTerm2 tab.
+    closes the terminal tab.
   - Your pins, hidden sessions and settings are stored in the app's own preferences.
 - **Renaming a running session** shows the new name right away, and writes it to the
   transcript only once the session has stopped. Claude Code keeps the title in memory and would
@@ -246,10 +252,11 @@ a subscription, read it as what the session would have cost through the API, not
 
 | Problem | Fix |
 | --- | --- |
-| *"Allow ClaudeResume to control iTerm2…"* banner | Turn on **System Settings → Privacy & Security → Automation → ClaudeResume → iTerm2**. If you built from source, macOS may ask again after a rebuild, because the ad-hoc signature changes. |
-| The tab opens but says `claude: command not found` | `claude` isn't on your iTerm2 shell's `PATH`. Check with `which claude` in a new iTerm2 tab. |
+| *"Allow ClaudeResume to control iTerm2…"* or *"…Ghostty…"* banner | Turn on that terminal in **System Settings → Privacy & Security → Automation → ClaudeResume**. If you built from source, macOS may ask again after a rebuild, because the ad-hoc signature changes. |
+| The tab opens but says `claude: command not found` | `claude` isn't on your selected terminal shell's `PATH`. Check with `which claude` in a new tab. |
 | *"… no longer exists"* | The session's folder was moved or deleted. `claude --resume` needs to run in the original folder, so move it back, or copy the session ID from the right-click menu. |
-| A running session opens a new tab instead of focusing | It's running somewhere iTerm2 can't see, such as VS Code's terminal or another terminal app. Switch to it there, or quit it first. |
+| A running session cannot be focused | iTerm2 can locate manually started sessions by tty. ClaudeResume can match Ghostty sessions it opened itself. Switch to the session's terminal, or quit it first. |
+| Ghostty automation fails | Use Ghostty 1.3 or later and enable `macos-applescript` in its configuration. |
 | No notifications | Allow them for ClaudeResume in **System Settings → Notifications**. Turns shorter than 20 seconds don't notify. |
 | Two notifications per turn | Another Claude Code notification hook or plugin is also active. Keep one of them. |
 | A session is missing | Sessions without a prompt you typed are skipped, for example ones that only ran a hook. **Show Hidden Conversations** brings back hidden ones. |
