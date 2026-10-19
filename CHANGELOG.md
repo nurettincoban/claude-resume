@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-19
+
 ### Added
 
 - A terminal setting beside **Open Sessions In**, with iTerm2 as the default and Ghostty 1.3+
