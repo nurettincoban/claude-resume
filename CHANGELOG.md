@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-19
+
 ### Added
 
 - **Needs you**: sessions blocked on a permission prompt or a question (Claude Code's `waiting`
