@@ -32,7 +32,9 @@ make install   # build the .app, copy it to ~/Applications and launch it
 
 | File | Responsibility |
 | --- | --- |
-| `AgentProfile.swift` | Claude accounts (config folders), their saved list and one scanner per account |
+| `AgentProfile.swift` | Claude and Codex accounts (config folders), their saved list and one scanner per account |
+| `CodexSessionScanner.swift` | Reads Codex rollouts and `session_index.jsonl` titles |
+| `CodexRuntime.swift` | Everything that talks to a running Codex: the app-server socket and app-launched clients. Optional: without it, Codex history still works |
 | `SessionScanner.swift` | Finds transcripts, caches them by size and date, and parses titles, prompts, recaps, links, files and usage from raw bytes |
 | `LiveSessions.swift` | Reads `~/.claude/sessions/*.json` for running sessions and finds each process's terminal |
 | `Search.swift` | Folding, scoring and highlight ranges for the search field |

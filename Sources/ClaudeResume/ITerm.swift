@@ -18,13 +18,21 @@ enum ITerm {
 
     /// The shell command that resumes a session in its own folder.
     static func resumeCommand(for session: Session, fork: Bool = false, extraFlags: String = "") -> String {
-        var parts = [Terminal.claude(for: session.profile), "--resume", session.id]
-        if fork { parts.append("--fork-session") }
+        var parts: [String]
+        switch session.profile.provider {
+        case .claude:
+            parts = [Terminal.claude(for: session.profile), "--resume", session.id]
+            if fork { parts.append("--fork-session") }
+        case .codex:
+            // A fork is a new conversation, so it doesn't carry this one's marker.
+            parts = [Terminal.codex(for: session.profile, marker: fork ? nil : session.key),
+                     fork ? "fork" : "resume", shellQuote(session.cliID)]
+        }
         let flags = extraFlags.trimmingCharacters(in: .whitespaces)
         if !flags.isEmpty { parts.append(flags) }
-        let claude = parts.joined(separator: " ")
-        guard let cwd = session.cwd else { return claude }
-        return "cd \(shellQuote(cwd)) && \(claude)"
+        let command = parts.joined(separator: " ")
+        guard let cwd = session.cwd else { return command }
+        return "cd \(shellQuote(cwd)) && \(command)"
     }
 
     /// POSIX single-quote escaping: `it's` becomes `'it'\''s'`.

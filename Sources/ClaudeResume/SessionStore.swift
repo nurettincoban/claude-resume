@@ -6,6 +6,7 @@ enum Prefs {
     static let terminal = "terminal"
     static let placement = "placement"
     static let extraFlags = "extraFlags"
+    static let extraCodexFlags = "extraCodexFlags"
     static let hotKey = "hotKeyEnabled"
     static let grouping = "grouping"
     static let notifications = "notifyWhenFinished"
@@ -13,6 +14,10 @@ enum Prefs {
     static let pinned = "pinnedSessions"
     static let hidden = "hiddenSessions"
     static let titles = "titleOverrides"
+
+    static func flags(for provider: AgentProvider) -> String {
+        UserDefaults.standard.string(forKey: provider == .claude ? extraFlags : extraCodexFlags) ?? ""
+    }
 
     static var currentPlacement: Terminal.Placement {
         Terminal.Placement(rawValue: UserDefaults.standard.string(forKey: placement) ?? "") ?? .tab
@@ -250,7 +255,7 @@ final class SessionStore {
     /// Adds an account folder to the list. Nothing is created on disk until you sign in or start
     /// a conversation with it.
     @discardableResult
-    func addProfile(name: String, directory: String) -> AgentProfile? {
+    func addProfile(name: String, directory: String, provider: AgentProvider = .claude) -> AgentProfile? {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let path = (directory.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath
         guard !name.isEmpty, path.hasPrefix("/"), !path.contains("\n"), !path.contains("\0") else {
@@ -267,7 +272,7 @@ final class SessionStore {
             error = "That path is a file. Choose a folder instead."
             return nil
         }
-        let profile = AgentProfile(id: UUID().uuidString, name: name, directory: url)
+        let profile = AgentProfile(id: UUID().uuidString, name: name, directory: url, provider: provider)
         profiles.append(profile)
         if persists { ProfilePreferences.save(profiles) }
         error = nil
@@ -287,7 +292,7 @@ final class SessionStore {
         refresh()
     }
 
-    /// Runs `claude auth login` for the account in a new tab.
+    /// Runs `claude auth login` or `codex login` for the account in a new tab.
     func signIn(_ profile: AgentProfile) {
         launch(Terminal.loginCommand(for: profile), for: profile, cwd: nil)
     }
@@ -304,7 +309,7 @@ final class SessionStore {
         onLaunch?()
         launchQueue.async {
             do {
-                if !profile.isPersonal {
+                if !profile.usesDefaultFolder {
                     try FileManager.default.createDirectory(at: profile.directory, withIntermediateDirectories: true,
                                                             attributes: [.posixPermissions: 0o700])
                 }
@@ -592,6 +597,23 @@ final class SessionStore {
               let index = sessions.firstIndex(where: { $0.key == session.key }) else { return }
         let base = titleOverrides[session.key]?.base ?? session.title
         sessions[index].title = title
+        if session.profile.provider == .codex {
+            // Codex keeps names in its own index, which only Codex writes. Show the name here
+            // until Codex has it.
+            titleOverrides[session.key] = TitleOverride(title: title, base: base)
+            saveOverrides()
+            guard persists else { return }
+            launchQueue.async {
+                do {
+                    try CodexRuntime.rename(session, to: title)
+                    DispatchQueue.main.async { self.refresh() }
+                } catch {
+                    let message = "Couldn't save the name to Codex. \(error.localizedDescription)"
+                    DispatchQueue.main.async { self.error = message }
+                }
+            }
+            return
+        }
         if live[session.key] == nil {
             do {
                 try TranscriptWriter.appendTitle(title, sessionId: session.id, to: session.transcriptURL)
@@ -620,6 +642,7 @@ final class SessionStore {
                 continue
             }
             sessions[index].title = override.title
+            if sessions[index].profile.provider == .codex { continue }
             if live[id] == nil, (try? TranscriptWriter.appendTitle(override.title, sessionId: sessions[index].id,
                                                                 to: sessions[index].transcriptURL)) != nil {
                 titleOverrides[id] = nil
@@ -640,14 +663,15 @@ final class SessionStore {
     func idleSessions(olderThan age: TimeInterval) -> [Session] {
         let cutoff = Date().addingTimeInterval(-age)
         return sessions.filter { session in
-            guard let live = live[session.key], live.status == .idle else { return false }
+            guard let live = live[session.key], live.status == .idle, live.statusKnown, live.pid > 0 else { return false }
             return (live.statusSince ?? session.lastActivity) < cutoff
         }
     }
 
     /// Stops the Claude Code processes and optionally closes their original terminal tabs.
     func quit(_ targets: [Session], closeTabs: Bool) {
-        let running = targets.compactMap { live[$0.key] }
+        // A Codex conversation can be loaded in Codex without a client of ours to stop.
+        let running = targets.compactMap { live[$0.key] }.filter { $0.pid > 0 }
         guard !running.isEmpty else { return }
         launchQueue.async {
             // Resolve terminal identities while the processes still exist, before sending SIGTERM.
@@ -671,14 +695,14 @@ final class SessionStore {
 
     func open(_ session: Session, placement: Terminal.Placement? = nil, fork: Bool = false) {
         error = nil
-        let running = fork ? nil : live[session.key]
+        // A Codex conversation loaded elsewhere (pid 0) has no terminal to switch to: resume it here.
+        let running = fork ? nil : live[session.key].flatMap { $0.pid > 0 ? $0 : nil }
         guard running != nil || session.folderExists else {
             error = "\(session.cwd ?? "The session's folder") no longer exists."
             return
         }
         let placement = placement ?? Prefs.currentPlacement
-        let command = Terminal.resumeCommand(for: session, fork: fork,
-                                          extraFlags: UserDefaults.standard.string(forKey: Prefs.extraFlags) ?? "")
+        let command = Terminal.resumeCommand(for: session, fork: fork, extraFlags: Prefs.flags(for: session.profile.provider))
         let terminal = Terminal.selected()
         onLaunch?()
         launchQueue.async {
@@ -695,7 +719,7 @@ final class SessionStore {
     }
 
     func copyCommand(_ session: Session) {
-        copy(Terminal.resumeCommand(for: session, extraFlags: UserDefaults.standard.string(forKey: Prefs.extraFlags) ?? ""))
+        copy(Terminal.resumeCommand(for: session, extraFlags: Prefs.flags(for: session.profile.provider)))
     }
 
     func copy(_ text: String) {

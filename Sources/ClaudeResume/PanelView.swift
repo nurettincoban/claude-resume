@@ -348,7 +348,7 @@ struct SessionRow: View {
     private var subtitle: some View {
         HStack(spacing: 4) {
             if showsAccount {
-                Text(session.profile.name)
+                Text(session.profile.label)
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
@@ -392,7 +392,7 @@ struct SessionRow: View {
     private var trailing: some View {
         VStack(alignment: .trailing, spacing: 3) {
             if isSelected || isHovered {
-                Image(systemName: live == nil ? "return" : "arrow.up.forward.app")
+                Image(systemName: live?.hasProcess == true ? "arrow.up.forward.app" : "return")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(isSelected ? Theme.accent : .secondary)
                     .frame(height: 14)
@@ -514,7 +514,7 @@ struct SessionMenu: View {
     let session: Session
 
     var body: some View {
-        let isLive = store.live[session.key] != nil
+        let isLive = store.live[session.key]?.hasProcess == true
         Button(isLive ? "Switch to Tab" : "Resume in New Tab") { store.open(session, placement: .tab) }
         Button("Resume in New Window") { store.open(session, placement: .window) }
         Button("Fork Conversation") { store.open(session, fork: true) }
@@ -530,7 +530,7 @@ struct SessionMenu: View {
         }
         Divider()
         Button("Copy Resume Command") { store.copyCommand(session) }
-        Button("Copy Session ID") { store.copy(session.id) }
+        Button("Copy Session ID") { store.copy(session.cliID) }
         Button("Open Folder") { store.revealFolder(session) }.disabled(!session.folderExists)
         Button("Show Transcript in Finder") { store.revealTranscript(session) }
         if isLive {
@@ -555,7 +555,7 @@ struct AccountPicker: View {
                     Button {
                         selection = profile.id
                     } label: {
-                        Text(profile.name)
+                        Text(profile.label)
                         if selection == profile.id { Image(systemName: "checkmark") }
                     }
                     .help(Fmt.path(profile.directory.path))
@@ -574,7 +574,7 @@ struct AccountPicker: View {
         HStack(spacing: 4) {
             Image(systemName: selection == nil ? "person.crop.circle" : "person.crop.circle.fill")
                 .font(.system(size: 11, weight: .medium))
-            if let name = profiles.first(where: { $0.id == selection })?.name {
+            if let name = profiles.first(where: { $0.id == selection })?.label {
                 Text(name)
                     .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
@@ -662,10 +662,13 @@ struct SettingsMenu: View {
             Picker("Open Sessions In", selection: $placement) {
                 ForEach(Terminal.Placement.allCases) { Text($0.title).tag($0) }
             }
-            Button("Extra claude Flags…") { Prompts.extraFlags() }
+            Button("Extra claude Flags…") { Prompts.extraFlags(for: .claude) }
+            if store.profiles.contains(where: { $0.provider == .codex }) {
+                Button("Extra codex Flags…") { Prompts.extraFlags(for: .codex) }
+            }
             Menu("Accounts") {
                 ForEach(store.profiles) { profile in
-                    Menu(profile.name) {
+                    Menu(profile.label) {
                         Text(Fmt.path(profile.directory.path))
                         Button("New Conversation…") { Prompts.newConversation(profile, store: store) }
                         Button("Sign In…") { store.signIn(profile) }
@@ -870,12 +873,15 @@ struct ErrorBanner: View {
 
 /// Small modal dialogs. They keep the panel open while they're up.
 enum Prompts {
-    @MainActor static func extraFlags() {
-        let current = UserDefaults.standard.string(forKey: Prefs.extraFlags) ?? ""
-        if let value = text(title: "Extra claude flags",
-                            message: "Added to every resume command, for example --model opus or --permission-mode plan.",
-                            value: current, placeholder: "--model opus", button: "Save") {
-            UserDefaults.standard.set(value.trimmingCharacters(in: .whitespaces), forKey: Prefs.extraFlags)
+    @MainActor static func extraFlags(for provider: AgentProvider) {
+        let key = provider == .claude ? Prefs.extraFlags : Prefs.extraCodexFlags
+        let message = provider == .claude
+            ? "Added to every resume command, for example --model opus or --permission-mode plan."
+            : "Added to every codex resume and fork command, for example --model or --sandbox."
+        if let value = text(title: "Extra \(provider.executable) flags", message: message,
+                            value: Prefs.flags(for: provider),
+                            placeholder: provider == .claude ? "--model opus" : "--model <model>", button: "Save") {
+            UserDefaults.standard.set(value.trimmingCharacters(in: .whitespaces), forKey: key)
         }
     }
 
@@ -883,12 +889,16 @@ enum Prompts {
         let alert = NSAlert()
         alert.messageText = "Add account"
         alert.informativeText = "Each account keeps its own login and history in its own folder. "
-            + "Point to an existing folder, or leave it blank to create one when you sign in."
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 58))
+            + "Point to an existing folder, or leave it blank to create one when you sign in. "
+            + "For Codex, a blank folder means ~/.codex if it isn't in the list yet."
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 92))
+        let provider = NSPopUpButton(frame: NSRect(x: 0, y: 66, width: 300, height: 26))
+        provider.addItems(withTitles: AgentProvider.allCases.map(\.title))
         let name = NSTextField(frame: NSRect(x: 0, y: 34, width: 300, height: 24))
         name.placeholderString = "Name, e.g. Work"
         let directory = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        directory.placeholderString = "Folder, e.g. ~/.claude-work"
+        directory.placeholderString = "Folder, e.g. ~/.claude-work or ~/.codex"
+        container.addSubview(provider)
         container.addSubview(name)
         container.addSubview(directory)
         alert.accessoryView = container
@@ -896,9 +906,13 @@ enum Prompts {
         alert.addButton(withTitle: "Add Account")
         alert.addButton(withTitle: "Cancel")
         guard run(alert) == .alertFirstButtonReturn else { return }
+        let selected = AgentProvider.allCases[max(0, provider.indexOfSelectedItem)]
         let path = directory.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let folder = path.isEmpty ? "~/.claude-accounts/\(UUID().uuidString.prefix(8).lowercased())" : path
-        if let profile = store.addProfile(name: name.stringValue, directory: folder) {
+        let defaultCodexTaken = store.profiles.contains { $0.provider == .codex && $0.usesDefaultFolder }
+        let folder = !path.isEmpty ? path
+            : selected == .codex && !defaultCodexTaken ? AgentProfile.defaultCodexDirectory.path
+            : "~/.\(selected.executable)-accounts/\(UUID().uuidString.prefix(8).lowercased())"
+        if let profile = store.addProfile(name: name.stringValue, directory: folder, provider: selected) {
             store.profileFilter = profile.id
         }
     }
@@ -930,7 +944,9 @@ enum Prompts {
     }
 
     @MainActor static func rename(_ session: Session, store: SessionStore) {
-        let message = store.live[session.key] == nil
+        let message = session.profile.provider == .codex
+            ? "The new name is saved to Codex, so codex resume shows it too. Codex needs to be running."
+            : store.live[session.key] == nil
             ? "The new name is saved in the transcript, so claude --resume shows it too."
             : "This session is running. ClaudeResume shows the new name now and saves it to the transcript once the session stops."
         if let value = text(title: "Rename conversation", message: message, value: session.title,

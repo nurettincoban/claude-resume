@@ -36,7 +36,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let content = UNMutableNotificationContent()
         content.title = session.title
         content.subtitle = "\(session.folderName) · \(reason)"
-        content.body = "Claude is waiting for you to answer before it can continue."
+        content.body = "\(session.profile.provider.title) is waiting for you to answer before it can continue."
         content.sound = .default
         content.threadIdentifier = session.key
         content.userInfo = ["sessionId": session.key]

@@ -52,7 +52,7 @@ struct PreviewPane: View {
             if let live {
                 HStack(spacing: 6) {
                     StatusDot(status: live.status)
-                    Text(live.status == .waiting ? "Needs you · \(live.waitingLabel)" : live.status.label)
+                    Text(!live.statusKnown ? "Running" : live.status == .waiting ? "Needs you · \(live.waitingLabel)" : live.status.label)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(live.status.color)
                 }
@@ -62,7 +62,7 @@ struct PreviewPane: View {
                 .lineLimit(3)
                 .textSelection(.enabled)
             if store.profiles.count > 1 {
-                Label(session.profile.name, systemImage: "person.crop.circle")
+                Label(session.profile.label, systemImage: "person.crop.circle")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .help(Fmt.path(session.profile.directory.path))
@@ -221,7 +221,8 @@ struct PreviewPane: View {
     private var actions: some View {
         HStack(spacing: 8) {
             Button { store.open(session) } label: {
-                Label(live == nil ? "Resume" : "Switch to Tab", systemImage: live == nil ? "play.fill" : "arrow.up.forward.app")
+                let running = live?.hasProcess == true
+                Label(running ? "Switch to Tab" : "Resume", systemImage: running ? "arrow.up.forward.app" : "play.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)

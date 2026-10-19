@@ -110,6 +110,12 @@ away. Pick one and you're back in it.
   `CLAUDE_CONFIG_DIR`, and with `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and
   `CLAUDE_CODE_OAUTH_TOKEN` cleared, so a key in your shell can't sign them in as someone else.
   Your default `~/.claude` account resumes exactly as before.
+- **Codex conversations, optionally.** Add a Codex account in **⋯ → Accounts** (a blank folder
+  means `~/.codex`) and its conversations appear next to Claude's, resuming with
+  `codex resume` and forking with `codex fork`. History comes from Codex's rollout files.
+  While Codex's local app-server is running, the list also shows which Codex conversations are
+  working or waiting. Without it, Codex conversations ClaudeResume started show as running with
+  an unknown status, and never count as working.
 
 ### Know what's happening
 
@@ -236,7 +242,8 @@ Click **⋯** in the panel's footer:
 - **Terminal**: iTerm2 (default) or Ghostty.
 - **Open Sessions In**: a new tab or a new window.
 - **Extra claude Flags**: added to every resume command, for example `--model opus`.
-- **Accounts**: add or remove Claude accounts, sign in, or start a new conversation with one.
+- **Accounts**: add or remove Claude or Codex accounts, sign in, or start a new conversation with one.
+- **Extra codex Flags**: added to every codex resume and fork command, once a Codex account is added.
 - **Notify When Claude Finishes**
 - **Show Hidden Conversations**
 - **Global Shortcut ⌃⌥R**
@@ -258,6 +265,8 @@ ClaudeResume reads what Claude Code already keeps on disk:
 | Running sessions: working, idle or needing you | `status` and `waitingFor` in `~/.claude/sessions/<pid>.json` (and each added account's `sessions/`), checked every 3 seconds |
 | The last turn | everything after your latest prompt, plus its `turn_duration` entry |
 | A session's iTerm2 tab | the process's terminal (`sysctl`), matched against each iTerm2 session's `tty` |
+| Codex conversations | `sessions/**/*.jsonl` rollouts and `session_index.jsonl` titles in each Codex account's folder |
+| Running Codex conversations | Codex's local app-server socket (`app-server-control/`), if it's running, plus Codex clients ClaudeResume started (`CLAUDE_RESUME_SESSION`) |
 | An app-launched Ghostty terminal | an inherited launch marker, mapped to Ghostty's surface ID |
 | Opening, focusing, closing tabs | native AppleScript to the session's terminal |
 
@@ -283,7 +292,7 @@ a subscription, read it as what the session would have cost through the API, not
   browser.
 - **Read-only, with four exceptions, all ones you trigger:**
   - Renaming a stopped session appends one `custom-title` line to its transcript, exactly like
-    `/rename`.
+    `/rename`. Renaming a Codex conversation asks the running Codex app-server to save the name.
   - Quitting a session sends its Claude Code process `SIGTERM`. If you asked for it, it then
     closes the terminal tab.
   - Your pins, hidden sessions and settings are stored in the app's own preferences.

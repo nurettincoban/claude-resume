@@ -49,6 +49,10 @@ struct Session: Identifiable, Hashable, Sendable {
     var displayPath: String?
     /// The account whose folder the transcript lives in.
     var profile: AgentProfile = .personal
+    /// Codex resumes by its session ID, which can differ from the thread ID in `id`.
+    var resumeID: String?
+    /// The ID the CLI's resume and fork commands take.
+    var cliID: String { resumeID ?? id }
 
     /// Identity for the list, pins, hidden sessions and running sessions. `id` stays the
     /// session ID that `claude --resume` takes.
@@ -515,7 +519,7 @@ enum TranscriptParser {
 
     // MARK: Bytes
 
-    private static func forEachLine(_ raw: UnsafeRawBufferPointer,
+    static func forEachLine(_ raw: UnsafeRawBufferPointer,
                                     _ body: (UnsafeBufferPointer<UInt8>, UnsafeBufferPointer<UInt8>) -> Void) {
         guard let base = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
         let count = raw.count
@@ -532,7 +536,7 @@ enum TranscriptParser {
         }
     }
 
-    private static func decode(_ line: UnsafeBufferPointer<UInt8>) -> [String: Any]? {
+    static func decode(_ line: UnsafeBufferPointer<UInt8>) -> [String: Any]? {
         let data = Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: line.baseAddress!), count: line.count,
                         deallocator: .none)
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -593,7 +597,7 @@ enum TranscriptParser {
         dateLock.withLock { fractional.date(from: string) ?? plain.date(from: string) }
     }
 
-    private static func contains(_ haystack: UnsafeBufferPointer<UInt8>, _ needle: [UInt8]) -> Bool {
+    static func contains(_ haystack: UnsafeBufferPointer<UInt8>, _ needle: [UInt8]) -> Bool {
         firstIndex(of: needle, in: haystack) != nil
     }
 

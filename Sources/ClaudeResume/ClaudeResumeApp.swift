@@ -373,7 +373,7 @@ enum Debug {
             exit(1)
         }
         do {
-            let running = LiveSessions.scan(profiles: profiles)[session.key]
+            let running = LiveSessions.scan(profiles: profiles)[session.key].flatMap { $0.hasProcess ? $0 : nil }
             let terminal = Terminal.selected()
             try Terminal.open(Terminal.resumeCommand(for: session), live: running, in: terminal,
                               placement: Prefs.currentPlacement, cwd: session.cwd)
