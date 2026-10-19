@@ -14,7 +14,7 @@
     <key>LSMinimumSystemVersion</key><string>15.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSAppleEventsUsageDescription</key><string>ClaudeResume opens and focuses your Claude Code sessions in iTerm2.</string>
+    <key>NSAppleEventsUsageDescription</key><string>ClaudeResume opens, focuses and closes your Claude Code sessions in iTerm2 or Ghostty.</string>
     <key>NSHumanReadableCopyright</key><string>© 2026 Nurettin Coban. MIT License.</string>
 </dict>
 </plist>

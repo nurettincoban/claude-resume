@@ -181,7 +181,7 @@ struct PreviewPane: View {
     private var actions: some View {
         HStack(spacing: 8) {
             Button { store.open(session) } label: {
-                Label(live == nil ? "Resume" : "Show in iTerm2", systemImage: live == nil ? "play.fill" : "arrow.up.forward.app")
+                Label(live == nil ? "Resume" : "Switch to Tab", systemImage: live == nil ? "play.fill" : "arrow.up.forward.app")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)

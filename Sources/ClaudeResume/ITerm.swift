@@ -3,11 +3,7 @@ import Foundation
 
 /// Opens and focuses Claude Code sessions in iTerm2 through AppleScript.
 enum ITerm {
-    enum Placement: String, CaseIterable, Identifiable {
-        case tab, window
-        var id: String { rawValue }
-        var title: String { self == .tab ? "New tab" : "New window" }
-    }
+    typealias Placement = Terminal.Placement
 
     struct Failure: Error, LocalizedError {
         let message: String

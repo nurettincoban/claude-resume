@@ -28,10 +28,10 @@ body:
       description: Output of `claude --version`. Transcript format changes between versions.
       placeholder: "2.1.296"
   - type: input
-    id: iterm
+    id: terminal
     attributes:
-      label: iTerm2 version
-      placeholder: "3.6.11"
+      label: Terminal and version
+      placeholder: "iTerm2 3.6.11 or Ghostty 1.3"
   - type: textarea
     id: error
     attributes:
