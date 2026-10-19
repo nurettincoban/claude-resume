@@ -103,6 +103,13 @@ away. Pick one and you're back in it.
   Changing the terminal setting affects new launches; existing sessions keep their own terminal.
 - **Fork** (<kbd>⌥↩</kbd>) continues a conversation as a new one (`--fork-session`).
 - **Extra flags** such as `--model opus` can be added to every resume.
+- **More than one Claude account.** Add another config folder in **⋯ → Accounts**, for example
+  `~/.claude-work`, and its conversations join the list. The account filter next to the search
+  field shows one account at a time. Each account can sign in and start new conversations from
+  the same menu. Sessions from other accounts resume with that account's
+  `CLAUDE_CONFIG_DIR`, and with `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and
+  `CLAUDE_CODE_OAUTH_TOKEN` cleared, so a key in your shell can't sign them in as someone else.
+  Your default `~/.claude` account resumes exactly as before.
 
 ### Know what's happening
 
@@ -229,6 +236,7 @@ Click **⋯** in the panel's footer:
 - **Terminal**: iTerm2 (default) or Ghostty.
 - **Open Sessions In**: a new tab or a new window.
 - **Extra claude Flags**: added to every resume command, for example `--model opus`.
+- **Accounts**: add or remove Claude accounts, sign in, or start a new conversation with one.
 - **Notify When Claude Finishes**
 - **Show Hidden Conversations**
 - **Global Shortcut ⌃⌥R**
@@ -241,13 +249,13 @@ ClaudeResume reads what Claude Code already keeps on disk:
 
 | What | Where it comes from |
 | --- | --- |
-| Conversations | `~/.claude/projects/<project>/<session>.jsonl` |
+| Conversations | `~/.claude/projects/<project>/<session>.jsonl`, and `projects/` in each added account's folder |
 | Titles, prompts, folder, branch | `custom-title`, `ai-title` and `user` entries in each transcript |
 | Recaps | `away_summary` entries, Claude's "while you were away" summaries |
 | Merge requests, artifacts | `pr-link` and `frame-link` entries |
 | Files changed | `Edit`, `Write`, `MultiEdit` and `NotebookEdit` tool calls |
 | Tokens, cost | `usage` blocks in the session and its `subagents/` transcripts, priced in `Pricing.swift` |
-| Running sessions: working, idle or needing you | `status` and `waitingFor` in `~/.claude/sessions/<pid>.json`, checked every 3 seconds |
+| Running sessions: working, idle or needing you | `status` and `waitingFor` in `~/.claude/sessions/<pid>.json` (and each added account's `sessions/`), checked every 3 seconds |
 | The last turn | everything after your latest prompt, plus its `turn_duration` entry |
 | A session's iTerm2 tab | the process's terminal (`sysctl`), matched against each iTerm2 session's `tty` |
 | An app-launched Ghostty terminal | an inherited launch marker, mapped to Ghostty's surface ID |
@@ -273,12 +281,14 @@ a subscription, read it as what the session would have cost through the API, not
 
 - **Nothing leaves your Mac.** The app makes no network requests. Links you click open in your
   browser.
-- **Read-only, with three exceptions, all ones you trigger:**
+- **Read-only, with four exceptions, all ones you trigger:**
   - Renaming a stopped session appends one `custom-title` line to its transcript, exactly like
     `/rename`.
   - Quitting a session sends its Claude Code process `SIGTERM`. If you asked for it, it then
     closes the terminal tab.
   - Your pins, hidden sessions and settings are stored in the app's own preferences.
+  - Signing in to an added account, or starting a conversation with it, creates its folder if
+    it doesn't exist yet. Removing an account from the list leaves its folder alone.
 - **Renaming a running session** shows the new name right away, and writes it to the
   transcript only once the session has stopped. Claude Code keeps the title in memory and would
   overwrite it.

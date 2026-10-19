@@ -18,7 +18,7 @@ enum ITerm {
 
     /// The shell command that resumes a session in its own folder.
     static func resumeCommand(for session: Session, fork: Bool = false, extraFlags: String = "") -> String {
-        var parts = ["claude", "--resume", session.id]
+        var parts = [Terminal.claude(for: session.profile), "--resume", session.id]
         if fork { parts.append("--fork-session") }
         let flags = extraFlags.trimmingCharacters(in: .whitespaces)
         if !flags.isEmpty { parts.append(flags) }

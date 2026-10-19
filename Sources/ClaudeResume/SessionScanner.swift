@@ -47,6 +47,12 @@ struct Session: Identifiable, Hashable, Sendable {
     var lastTurn: TurnSummary?
     /// Shown instead of `cwd` (demo data only, so screenshots never show a real path).
     var displayPath: String?
+    /// The account whose folder the transcript lives in.
+    var profile: AgentProfile = .personal
+
+    /// Identity for the list, pins, hidden sessions and running sessions. `id` stays the
+    /// session ID that `claude --resume` takes.
+    var key: String { profile.sessionKey(id) }
 
     /// The folder as shown and grouped in the UI.
     var projectPath: String? { displayPath ?? cwd }
@@ -101,12 +107,19 @@ final class SessionScanner: @unchecked Sendable {
     }
 
     private let root: URL
+    private let profile: AgentProfile
     private let lock = NSLock()
     private var cache: [String: (stamp: Stamp, session: Session?)] = [:]
     private static let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]
 
     init(root: URL = SessionScanner.defaultRoot) {
         self.root = root
+        profile = .personal
+    }
+
+    init(profile: AgentProfile) {
+        root = profile.projectsRoot
+        self.profile = profile
     }
 
     func scan() -> [Session] {
@@ -156,6 +169,7 @@ final class SessionScanner: @unchecked Sendable {
             TranscriptParser.parse($0, id: file.deletingPathExtension().lastPathComponent,
                                    url: file, modified: stamp.modified)
         }
+        session?.profile = profile
         if session != nil, !subagents.isEmpty {
             var usage = UsageTally()
             for url in subagents {

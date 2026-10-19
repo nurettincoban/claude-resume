@@ -42,6 +42,22 @@ enum Terminal {
         ITerm.resumeCommand(for: session, fork: fork, extraFlags: extraFlags)
     }
 
+    /// `claude` for Personal, exactly as before. Other accounts get their own config folder, and
+    /// credentials from the shell are dropped so they can't sign in as a different account.
+    static func claude(for profile: AgentProfile) -> String {
+        guard !profile.isPersonal else { return "claude" }
+        return "env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN "
+            + "CLAUDE_CONFIG_DIR=\(ITerm.shellQuote(profile.directory.path)) claude"
+    }
+
+    static func loginCommand(for profile: AgentProfile) -> String {
+        "\(claude(for: profile)) auth login"
+    }
+
+    static func newCommand(for profile: AgentProfile, cwd: String) -> String {
+        "cd \(ITerm.shellQuote(cwd)) && \(claude(for: profile))"
+    }
+
     static func run(_ command: String, in kind: Kind, placement: Placement, cwd: String? = nil) throws {
         guard kind.isInstalled else { throw Failure(message: "\(kind.title) isn't installed.") }
         switch kind {
