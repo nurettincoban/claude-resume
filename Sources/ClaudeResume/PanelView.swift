@@ -146,6 +146,7 @@ struct ListPane: View {
                 HStack(spacing: 1) {
                     Text(store.query.isEmpty ? "Search conversations" : store.query)
                         .foregroundStyle(store.query.isEmpty ? .tertiary : .primary)
+                        .lineLimit(1)
                     if !store.query.isEmpty {
                         Rectangle().fill(Theme.accent).frame(width: 1.5, height: 18)
                     }
@@ -525,7 +526,8 @@ struct ProjectPicker: View {
 
     var body: some View {
         if Snapshot.isActive {
-            label
+            // Without the Menu around it, the label would take all the width it's offered.
+            label.fixedSize()
         } else {
             Menu {
                 Button("All Projects") { selection = nil }

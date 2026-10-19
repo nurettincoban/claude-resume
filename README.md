@@ -60,14 +60,32 @@ away. Pick one and you're back in it.
     </td>
     <td width="50%">
       <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-projects-dark.png">
-        <img src="docs/screenshot-projects.png" alt="Conversations grouped by project, with a pinned conversation on top">
+        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-project-dark.png">
+        <img src="docs/screenshot-project.png" alt="The list filtered to the storefront project with the folder button">
       </picture>
     </td>
   </tr>
   <tr>
     <td align="center"><sub>Loose search with highlighted matches</sub></td>
-    <td align="center"><sub>Grouped by project, with a pinned conversation</sub></td>
+    <td align="center"><sub>Filtered to one project</sub></td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-projects-dark.png">
+        <img src="docs/screenshot-projects.png" alt="Conversations grouped by project, with a pinned conversation on top">
+      </picture>
+    </td>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-cost-dark.png">
+        <img src="docs/screenshot-cost.png" alt="Conversations grouped by cost, most expensive first, with the total">
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Grouped by project</sub></td>
+    <td align="center"><sub>Grouped by cost, with the total</sub></td>
   </tr>
 </table>
 
@@ -98,6 +116,11 @@ away. Pick one and you're back in it.
   longer than 20 seconds ends. The second shows what the turn did, for example
   *"4m 12s · 6 edits · +≈$0.84"*, and the start of Claude's reply. Clicking either takes you to
   that tab. If that tab is already in front of you, there's no notification.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-needs-you-dark.png">
+  <img src="docs/screenshot-needs-you.png" width="840" alt="A session waiting for permission to run Bash sits in the Needs you section with an amber dot; its preview shows the reason, the last turn, the recap and Claude asking whether it may run a build command">
+</picture>
 - **Preview** (<kbd>→</kbd>). A side pane shows the session without resuming it:
   - the last turn: how long it took, edits, tool errors and what it cost
   - Claude's latest recap and your last prompt

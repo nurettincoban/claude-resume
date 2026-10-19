@@ -4,7 +4,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Renders the panel without a menu bar, for README screenshots and layout checks:
-/// `ClaudeResume --snapshot out.png [--demo] [--dark] [--query text]`, or an animated demo
+/// `ClaudeResume --snapshot out.png [--demo] [--dark] [--query text] [--group date|project|cost]
+/// [--filter running] [--project name] [--select n | --select-id id] [--preview]`, or an animated demo
 /// with `ClaudeResume --gif out.gif [--dark]`.
 enum Snapshot {
     static let outputPath = argument("--snapshot")
@@ -38,6 +39,11 @@ enum Snapshot {
            let grouping = Grouping(rawValue: arguments[index + 1]) {
             store.grouping = grouping
         }
+        if argument("--filter") == "running" { store.filter = .running }
+        if let name = argument("--project") {
+            store.project = store.projects.first { ($0.path as NSString).lastPathComponent == name }?.path
+        }
+        if let id = argument("--select-id") { store.selection = id }
         store.previewOpen = arguments.contains("--preview")
 
         NSApplication.shared.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -178,7 +184,10 @@ enum Demo {
             session("a2", "Investigate flaky integration test in CI", "api-gateway", "fix/flaky-auth-test", 9, 600, cost: 2.31,
                     recap: "The auth test fails when two runs share a Redis key; I proposed per-run key prefixes.",
                     links: [mr(455, "api-gateway")]),
-            session("a3", "Add dark mode to the settings screen", "mobile-app", "main", 15, 2 * 3600, cost: 3.06),
+            session("a3", "Add dark mode to the settings screen", "mobile-app", "main", 15, 2 * 3600, cost: 3.06,
+                    recap: "Dark mode colours are in place for Settings and Profile. Claude wants to rebuild the theme tokens before checking contrast on the remaining screens.",
+                    reply: "The new colour tokens are wired into SettingsView and ProfileView.\nTo check they compile and meet contrast, I need to run `npm run build:tokens`. OK to run it?",
+                    files: ["src/theme/tokens.ts", "src/screens/SettingsView.tsx", "src/screens/ProfileView.tsx"]),
             session("a4", "Write migration for the orders table", "storefront", "chore/orders-index", 6, 5 * 3600, cost: 0.92),
             session("a5", "Explain how the rate limiter works", "api-gateway", nil, 3, 26 * 3600, cost: 0.41),
             session("a6", "Design a plugin system for the CLI", "devtools", "spike/plugins", 31, 30 * 3600, cost: 11.2),

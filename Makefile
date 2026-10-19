@@ -26,6 +26,12 @@ screenshots:  ## Regenerate README screenshots from demo data
 	"$$(swift build -c release --show-bin-path)/ClaudeResume" --snapshot docs/screenshot-search-dark.png --demo --dark --query "chkout flw" -AppleLocale en_US -AppleLanguages "(en)"
 	"$$(swift build -c release --show-bin-path)/ClaudeResume" --snapshot docs/screenshot-projects.png --demo --group project -AppleLocale en_US -AppleLanguages "(en)"
 	"$$(swift build -c release --show-bin-path)/ClaudeResume" --snapshot docs/screenshot-projects-dark.png --demo --dark --group project -AppleLocale en_US -AppleLanguages "(en)"
+	"$$(swift build -c release --show-bin-path)/ClaudeResume" --snapshot docs/screenshot-cost.png --demo --group cost -AppleLocale en_US -AppleLanguages "(en)"
+	"$$(swift build -c release --show-bin-path)/ClaudeResume" --snapshot docs/screenshot-cost-dark.png --demo --dark --group cost -AppleLocale en_US -AppleLanguages "(en)"
+	"$$(swift build -c release --show-bin-path)/ClaudeResume" --snapshot docs/screenshot-project.png --demo --project storefront -AppleLocale en_US -AppleLanguages "(en)"
+	"$$(swift build -c release --show-bin-path)/ClaudeResume" --snapshot docs/screenshot-project-dark.png --demo --dark --project storefront -AppleLocale en_US -AppleLanguages "(en)"
+	"$$(swift build -c release --show-bin-path)/ClaudeResume" --snapshot docs/screenshot-needs-you.png --demo --select-id a3 --preview -AppleLocale en_US -AppleLanguages "(en)"
+	"$$(swift build -c release --show-bin-path)/ClaudeResume" --snapshot docs/screenshot-needs-you-dark.png --demo --dark --select-id a3 --preview -AppleLocale en_US -AppleLanguages "(en)"
 	"$$(swift build -c release --show-bin-path)/ClaudeResume" --gif docs/demo.gif -AppleLocale en_US -AppleLanguages "(en)"
 	"$$(swift build -c release --show-bin-path)/ClaudeResume" --gif docs/demo-dark.gif --dark -AppleLocale en_US -AppleLanguages "(en)"
 
