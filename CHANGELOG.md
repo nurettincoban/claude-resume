@@ -13,6 +13,14 @@ All notable changes to this project are documented here. The format follows
 - Focus, close and notification routing to each running session's original terminal,
   including manually started iTerm2 sessions and app-launched Ghostty sessions.
 
+### Changed
+
+- A running session whose terminal can't be found (for example tmux inside iTerm2, or VS Code's
+  terminal) now shows an error instead of opening a second process in a new tab. Switch to it
+  where it runs, or quit it first.
+- "Show in iTerm2" is now **Switch to Tab**, since the session can be in either terminal.
+- The Terminal setting marks terminals that aren't installed.
+
 ### Fixed
 
 - Refuse to resume a duplicate process when a running conversation's terminal cannot be found.

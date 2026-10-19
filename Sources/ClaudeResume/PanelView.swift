@@ -430,7 +430,7 @@ struct SessionMenu: View {
 
     var body: some View {
         let isLive = store.live[session.id] != nil
-        Button(isLive ? "Show in Terminal" : "Resume in New Tab") { store.open(session, placement: .tab) }
+        Button(isLive ? "Switch to Tab" : "Resume in New Tab") { store.open(session, placement: .tab) }
         Button("Resume in New Window") { store.open(session, placement: .window) }
         Button("Fork Conversation") { store.open(session, fork: true) }
         Divider()
@@ -518,7 +518,12 @@ struct SettingsMenu: View {
                 ForEach(Grouping.allCases) { Text($0.title).tag($0) }
             }
             Picker("Terminal", selection: $terminal) {
-                ForEach(Terminal.Kind.allCases) { Text($0.title).tag($0) }
+                ForEach(Terminal.Kind.allCases) { kind in
+                    let installed = kind.isInstalled
+                    Text(installed ? kind.title : "\(kind.title) (not installed)")
+                        .tag(kind)
+                        .disabled(!installed && kind != terminal)
+                }
             }
             Picker("Open Sessions In", selection: $placement) {
                 ForEach(Terminal.Placement.allCases) { Text($0.title).tag($0) }
