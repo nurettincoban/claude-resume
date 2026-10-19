@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Accounts**: add more Claude Code config folders (`CLAUDE_CONFIG_DIR`) in **⋯ → Accounts**
+  and see their conversations in the same list, with an account filter next to the search
+  field. Sessions from added accounts resume with their own folder and without the API keys or
+  tokens from your shell. The default `~/.claude` account works exactly as before, and with
+  only one account nothing in the panel changes.
+
 ### Changed
 
 - The list shows 50 conversations at a time and loads more as you scroll. Search, filters,

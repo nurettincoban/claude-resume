@@ -80,6 +80,15 @@ enum LiveSessions {
         return nil
     }
 
+    /// Running sessions across accounts, keyed by `Session.key`.
+    static func scan(profiles: [AgentProfile]) -> [String: LiveSession] {
+        var result: [String: LiveSession] = [:]
+        for profile in profiles {
+            for (id, live) in scan(root: profile.sessionsRoot) { result[profile.sessionKey(id)] = live }
+        }
+        return result
+    }
+
     /// Running sessions keyed by session id. Registry files left behind by crashed processes are ignored.
     static func scan(root: URL = defaultRoot) -> [String: LiveSession] {
         guard let files = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)

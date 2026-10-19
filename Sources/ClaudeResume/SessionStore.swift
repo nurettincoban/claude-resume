@@ -80,6 +80,10 @@ final class SessionStore {
         }
     }
     private(set) var isLoaded = false
+    /// Personal first, then the accounts added in Settings.
+    private(set) var profiles: [AgentProfile] = [.personal]
+    /// Only show sessions from this account.
+    var profileFilter: String? { didSet { if profileFilter != oldValue { project = nil; resetListing() } } }
     var query = "" { didSet { if query != oldValue { resetListing() } } }
     var filter: SessionFilter = .all { didSet { if filter != oldValue { resetListing() } } }
     /// Only show sessions from this folder.
@@ -131,8 +135,7 @@ final class SessionStore {
     /// Called when something needs the person's attention after the panel was closed.
     var onError: (() -> Void)?
 
-    private let scanner: SessionScanner
-    private let liveRoot: URL
+    private let scanner = ProfileScanner()
     private let persists: Bool
     private var scanning = false
     private var rescanRequested = false
@@ -146,10 +149,9 @@ final class SessionStore {
     /// Sessions that just started waiting for permission or an answer.
     private(set) var needsInput: Set<String> = []
 
-    init(scanner: SessionScanner = SessionScanner(), liveRoot: URL = LiveSessions.defaultRoot) {
-        self.scanner = scanner
-        self.liveRoot = liveRoot
+    init() {
         persists = true
+        profiles = ProfilePreferences.load()
         if let data = UserDefaults.standard.data(forKey: Prefs.titles),
            let saved = try? JSONDecoder().decode([String: TitleOverride].self, from: data) {
             titleOverrides = saved
@@ -158,8 +160,6 @@ final class SessionStore {
 
     /// Loads demo data for screenshots and tests. Nothing is read from or written to disk.
     init(demo sessions: [Session], live: [String: LiveSession], pinned: Set<String> = []) {
-        scanner = SessionScanner(root: URL(fileURLWithPath: "/nonexistent"))
-        liveRoot = URL(fileURLWithPath: "/nonexistent")
         persists = false
         grouping = .date
         showHidden = false
@@ -167,6 +167,8 @@ final class SessionStore {
         self.pinned = pinned
         self.sessions = sessions
         self.live = live
+        var seen: Set<AgentProfile> = [.personal]
+        profiles = [.personal] + sessions.map(\.profile).filter { seen.insert($0).inserted }
         isLoaded = true
         selectFirst()
     }
@@ -187,11 +189,13 @@ final class SessionStore {
         guard persists else { return }
         guard !scanning else { rescanRequested = true; return }
         scanning = true
-        let scanner = scanner, liveRoot = liveRoot
+        let scanner = scanner, profiles = profiles
         Task.detached(priority: .userInitiated) {
-            let sessions = scanner.scan()
-            let live = LiveSessions.scan(root: liveRoot)
+            let sessions = scanner.scan(profiles)
+            let live = LiveSessions.scan(profiles: profiles)
             await MainActor.run {
+                // An account was added or removed meanwhile: scan again with the new list.
+                guard profiles == self.profiles else { self.scanning = false; self.refresh(); return }
                 self.trackTurns(live)
                 self.apply(sessions: sessions, live: live)
                 self.scanning = false
@@ -201,11 +205,11 @@ final class SessionStore {
     }
 
     private func refreshLive() {
-        let liveRoot = liveRoot
+        let profiles = profiles
         Task.detached(priority: .utility) {
-            let live = LiveSessions.scan(root: liveRoot)
+            let live = LiveSessions.scan(profiles: profiles)
             await MainActor.run {
-                guard live != self.live else { return }
+                guard profiles == self.profiles, live != self.live else { return }
                 // A session that went busy or idle has new messages; pick them up.
                 self.trackTurns(live)
                 self.live = live
@@ -237,8 +241,82 @@ final class SessionStore {
         self.sessions = sessions
         self.live = live
         isLoaded = true
-        if selection == nil || !visible.contains(where: { $0.id == selection }) { selectFirst() }
+        if selection == nil || !visible.contains(where: { $0.key == selection }) { selectFirst() }
         announceFinished()
+    }
+
+    // MARK: Accounts
+
+    /// Adds an account folder to the list. Nothing is created on disk until you sign in or start
+    /// a conversation with it.
+    @discardableResult
+    func addProfile(name: String, directory: String) -> AgentProfile? {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let path = (directory.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath
+        guard !name.isEmpty, path.hasPrefix("/"), !path.contains("\n"), !path.contains("\0") else {
+            error = "Enter an account name and an absolute folder path."
+            return nil
+        }
+        let url = AgentProfile.canonicalDirectory(path)
+        guard !profiles.contains(where: { AgentProfile.canonicalDirectory($0.directory.path) == url }) else {
+            error = "That folder already belongs to an account in the list. Each account needs its own folder."
+            return nil
+        }
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue {
+            error = "That path is a file. Choose a folder instead."
+            return nil
+        }
+        let profile = AgentProfile(id: UUID().uuidString, name: name, directory: url)
+        profiles.append(profile)
+        if persists { ProfilePreferences.save(profiles) }
+        error = nil
+        refresh()
+        return profile
+    }
+
+    /// Removes an account from the list. Its login and history stay in its folder.
+    func removeProfile(_ profile: AgentProfile) {
+        guard !profile.isPersonal else { return }
+        profiles.removeAll { $0.id == profile.id }
+        let keys = Set(sessions.filter { $0.profile.id == profile.id }.map(\.key))
+        sessions.removeAll { $0.profile.id == profile.id }
+        live = live.filter { !keys.contains($0.key) }
+        if profileFilter == profile.id { profileFilter = nil }
+        if persists { ProfilePreferences.save(profiles) }
+        refresh()
+    }
+
+    /// Runs `claude auth login` for the account in a new tab.
+    func signIn(_ profile: AgentProfile) {
+        launch(Terminal.loginCommand(for: profile), for: profile, cwd: nil)
+    }
+
+    /// Starts a new conversation with the account in `cwd`.
+    func newConversation(_ profile: AgentProfile, cwd: URL) {
+        launch(Terminal.newCommand(for: profile, cwd: cwd.path), for: profile, cwd: cwd.path)
+    }
+
+    private func launch(_ command: String, for profile: AgentProfile, cwd: String?) {
+        guard profiles.contains(profile) else { return }
+        error = nil
+        let terminal = Terminal.selected()
+        onLaunch?()
+        launchQueue.async {
+            do {
+                if !profile.isPersonal {
+                    try FileManager.default.createDirectory(at: profile.directory, withIntermediateDirectories: true,
+                                                            attributes: [.posixPermissions: 0o700])
+                }
+                try Terminal.run(command, in: terminal, placement: .tab, cwd: cwd)
+            } catch {
+                let message = error.localizedDescription
+                DispatchQueue.main.async {
+                    self.error = message
+                    self.onError?()
+                }
+            }
+        }
     }
 
     // MARK: Notifications
@@ -280,7 +358,7 @@ final class SessionStore {
         var matches: [String: Search.Match] = [:]
         let sections = makeSections(matches: &matches)
         let ordered = sections.flatMap(\.sessions)
-        let indices = ordered.enumerated().reduce(into: [String: Int]()) { $0[$1.element.id] = $1.offset }
+        let indices = ordered.enumerated().reduce(into: [String: Int]()) { $0[$1.element.key] = $1.offset }
         let result = Listing(day: day, sections: sections, sessions: ordered, indices: indices,
                              matches: matches, projects: makeProjects())
         cachedListing = result
@@ -334,12 +412,12 @@ final class SessionStore {
     func loadMoreIfNeeded(after id: String) {
         let current = listing.sessions
         let count = min(displayLimit, current.count)
-        guard count > 0, count < current.count, current[count - 1].id == id else { return }
+        guard count > 0, count < current.count, current[count - 1].key == id else { return }
         displayLimit += Self.pageSize
     }
 
     func highlightRanges(for session: Session) -> [Range<String.Index>] {
-        listing.matches[session.id]?.titleRanges ?? []
+        listing.matches[session.key]?.titleRanges ?? []
     }
 
     private func makeSections(matches: inout [String: Search.Match]) -> [SessionSection] {
@@ -348,17 +426,17 @@ final class SessionStore {
         if !terms.isEmpty {
             let ranked = base.compactMap { session -> (Session, Double)? in
                 guard let match = Search.match(session, terms: terms) else { return nil }
-                matches[session.id] = match
+                matches[session.key] = match
                 return (session, match.score)
             }
                 .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.lastActivity > $1.0.lastActivity }
             return ranked.isEmpty ? [] : [SessionSection(id: "results", title: "Results", sessions: ranked.map(\.0))]
         }
         // Sessions blocked on you come first, whatever the grouping.
-        let waiting = base.filter { live[$0.id]?.status == .waiting }
-        let waitingIds = Set(waiting.map(\.id))
-        let pinnedSessions = base.filter { pinned.contains($0.id) && !waitingIds.contains($0.id) }
-        let rest = base.filter { !pinned.contains($0.id) && !waitingIds.contains($0.id) }
+        let waiting = base.filter { live[$0.key]?.status == .waiting }
+        let waitingIds = Set(waiting.map(\.key))
+        let pinnedSessions = base.filter { pinned.contains($0.key) && !waitingIds.contains($0.key) }
+        let rest = base.filter { !pinned.contains($0.key) && !waitingIds.contains($0.key) }
         var result: [SessionSection] = []
         if !waiting.isEmpty {
             result.append(SessionSection(id: "waiting", title: "Needs you", sessions: waiting))
@@ -386,9 +464,10 @@ final class SessionStore {
     /// Sessions after the Running, project and hidden filters, before search and grouping.
     private var scoped: [Session] {
         sessions.filter { session in
-            (filter == .all || live[session.id] != nil)
+            (filter == .all || live[session.key] != nil)
+                && (profileFilter == nil || session.profile.id == profileFilter)
                 && (project == nil || session.projectPath == project)
-                && (showHidden || !hidden.contains(session.id))
+                && (showHidden || !hidden.contains(session.key))
         }
     }
 
@@ -397,7 +476,8 @@ final class SessionStore {
 
     private func makeProjects() -> [(path: String, name: String, count: Int)] {
         var order: [String] = [], counts: [String: Int] = [:]
-        for session in sessions where showHidden || !hidden.contains(session.id) {
+        for session in sessions where (showHidden || !hidden.contains(session.key))
+            && (profileFilter == nil || session.profile.id == profileFilter) {
             guard let cwd = session.projectPath else { continue }
             if counts[cwd] == nil { order.append(cwd) }
             counts[cwd, default: 0] += 1
@@ -405,7 +485,7 @@ final class SessionStore {
         return order.map { ($0, ($0 as NSString).lastPathComponent, counts[$0] ?? 0) }
     }
 
-    var hiddenCount: Int { sessions.filter { hidden.contains($0.id) }.count }
+    var hiddenCount: Int { sessions.filter { hidden.contains($0.key) }.count }
 
     nonisolated static func group(_ sessions: [Session], now: Date, calendar: Calendar = .current) -> [SessionSection] {
         var buckets: [String: SessionSection] = [:], order: [String] = []
@@ -452,7 +532,7 @@ final class SessionStore {
     // MARK: Selection
 
     private func selectFirst() {
-        selection = visible.first?.id
+        selection = visible.first?.key
     }
 
     /// Loads enough pages to show the selection, e.g. after moving past the last loaded row.
@@ -466,34 +546,34 @@ final class SessionStore {
         let list = current.sessions
         guard !list.isEmpty else { return }
         let index = selection.flatMap { current.indices[$0] } ?? (offset > 0 ? -1 : list.count)
-        selection = list[max(0, min(list.count - 1, index + offset))].id
+        selection = list[max(0, min(list.count - 1, index + offset))].key
     }
 
     var selectedSession: Session? {
-        sessions.first { $0.id == selection }
+        sessions.first { $0.key == selection }
     }
 
     func session(_ id: String) -> Session? {
-        sessions.first { $0.id == id }
+        sessions.first { $0.key == id }
     }
 
     // MARK: Library
 
     func togglePin(_ session: Session) {
-        if pinned.remove(session.id) == nil { pinned.insert(session.id) }
+        if pinned.remove(session.key) == nil { pinned.insert(session.key) }
         save(pinned, Prefs.pinned)
     }
 
     func toggleHidden(_ session: Session) {
-        if hidden.remove(session.id) == nil {
+        if hidden.remove(session.key) == nil {
             // Read the order from before the hide, so the next row can take the selection.
             let list = visible
-            hidden.insert(session.id)
-            pinned.remove(session.id)
+            hidden.insert(session.key)
+            pinned.remove(session.key)
             save(pinned, Prefs.pinned)
-            if !showHidden, selection == session.id {
-                if let index = list.firstIndex(where: { $0.id == session.id }) {
-                    selection = list.indices.contains(index + 1) ? list[index + 1].id : list.dropLast().last?.id
+            if !showHidden, selection == session.key {
+                if let index = list.firstIndex(where: { $0.key == session.key }) {
+                    selection = list.indices.contains(index + 1) ? list[index + 1].key : list.dropLast().last?.key
                 }
             }
         }
@@ -509,19 +589,19 @@ final class SessionStore {
     /// so `claude --resume` shows it too. Running ones are written once they stop.
     func rename(_ session: Session, to raw: String) {
         guard let title = TranscriptParser.clean(raw), title != session.title,
-              let index = sessions.firstIndex(where: { $0.id == session.id }) else { return }
-        let base = titleOverrides[session.id]?.base ?? session.title
+              let index = sessions.firstIndex(where: { $0.key == session.key }) else { return }
+        let base = titleOverrides[session.key]?.base ?? session.title
         sessions[index].title = title
-        if live[session.id] == nil {
+        if live[session.key] == nil {
             do {
                 try TranscriptWriter.appendTitle(title, sessionId: session.id, to: session.transcriptURL)
-                titleOverrides[session.id] = nil
+                titleOverrides[session.key] = nil
             } catch {
                 self.error = "Couldn't rename: \(error.localizedDescription)"
-                titleOverrides[session.id] = TitleOverride(title: title, base: base)
+                titleOverrides[session.key] = TitleOverride(title: title, base: base)
             }
         } else {
-            titleOverrides[session.id] = TitleOverride(title: title, base: base)
+            titleOverrides[session.key] = TitleOverride(title: title, base: base)
         }
         saveOverrides()
         refresh()
@@ -531,7 +611,7 @@ final class SessionStore {
         guard !titleOverrides.isEmpty else { return }
         var changed = false
         for (id, override) in titleOverrides {
-            guard let index = sessions.firstIndex(where: { $0.id == id }) else { continue }
+            guard let index = sessions.firstIndex(where: { $0.key == id }) else { continue }
             let parsed = sessions[index].title
             if parsed == override.title || parsed != override.base {
                 // The transcript caught up, or the session was renamed somewhere else.
@@ -540,7 +620,7 @@ final class SessionStore {
                 continue
             }
             sessions[index].title = override.title
-            if live[id] == nil, (try? TranscriptWriter.appendTitle(override.title, sessionId: id,
+            if live[id] == nil, (try? TranscriptWriter.appendTitle(override.title, sessionId: sessions[index].id,
                                                                 to: sessions[index].transcriptURL)) != nil {
                 titleOverrides[id] = nil
                 changed = true
@@ -560,14 +640,14 @@ final class SessionStore {
     func idleSessions(olderThan age: TimeInterval) -> [Session] {
         let cutoff = Date().addingTimeInterval(-age)
         return sessions.filter { session in
-            guard let live = live[session.id], live.status == .idle else { return false }
+            guard let live = live[session.key], live.status == .idle else { return false }
             return (live.statusSince ?? session.lastActivity) < cutoff
         }
     }
 
     /// Stops the Claude Code processes and optionally closes their original terminal tabs.
     func quit(_ targets: [Session], closeTabs: Bool) {
-        let running = targets.compactMap { live[$0.id] }
+        let running = targets.compactMap { live[$0.key] }
         guard !running.isEmpty else { return }
         launchQueue.async {
             // Resolve terminal identities while the processes still exist, before sending SIGTERM.
@@ -591,7 +671,7 @@ final class SessionStore {
 
     func open(_ session: Session, placement: Terminal.Placement? = nil, fork: Bool = false) {
         error = nil
-        let running = fork ? nil : live[session.id]
+        let running = fork ? nil : live[session.key]
         guard running != nil || session.folderExists else {
             error = "\(session.cwd ?? "The session's folder") no longer exists."
             return
