@@ -133,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showPanel() {
         store.refresh()
         KeyboardState.lastMoveWasKeyboard = false
-        if store.query.isEmpty { store.selection = store.visible.first?.id }
+        if store.query.isEmpty { store.selection = store.visible.first?.key }
         panel.setFrame(NSRect(origin: origin(for: panelSize), size: panelSize), display: false)
         NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
@@ -346,11 +346,13 @@ enum StatusIcon {
 @MainActor
 enum Debug {
     static func dump() {
-        let sessions = SessionScanner().scan()
-        let live = LiveSessions.scan()
+        let profiles = ProfilePreferences.load()
+        let sessions = ProfileScanner().scan(profiles)
+        let live = LiveSessions.scan(profiles: profiles)
         for session in sessions {
-            let status = live[session.id].map { "[\($0.status.rawValue)]" } ?? ""
-            print("\(Fmt.age(session.lastActivity).padding(toLength: 7, withPad: " ", startingAt: 0)) \(session.id.prefix(8)) \(session.folderName) · \(session.branch ?? "-") · \(session.promptCount)p \(status)")
+            let status = live[session.key].map { "[\($0.status.rawValue)]" } ?? ""
+            let account = profiles.count > 1 ? " [\(session.profile.name)]" : ""
+            print("\(Fmt.age(session.lastActivity).padding(toLength: 7, withPad: " ", startingAt: 0)) \(session.id.prefix(8))\(account) \(session.folderName) · \(session.branch ?? "-") · \(session.promptCount)p \(status)")
             print("        \(session.title)")
             let cost = Fmt.cost(session) ?? "-"
             print("        \(cost) · \(Fmt.compact(session.tokens)) tokens · \(session.models.joined(separator: ", ")) · \(session.filesChanged.count) files · \(session.links.map(\.detail).joined(separator: ", "))")
@@ -360,11 +362,18 @@ enum Debug {
     }
 
     static func resume(_ id: String) {
-        guard let session = SessionScanner().scan().first(where: { $0.id.hasPrefix(id) }) else {
+        let profiles = ProfilePreferences.load()
+        let matches = ProfileScanner().scan(profiles).filter { $0.key == id || $0.id.hasPrefix(id) }
+        guard let session = matches.first else {
             print("No session matching \(id)"); exit(1)
         }
+        // Copied account folders can share session IDs.
+        guard matches.count == 1 || matches.first?.key == id else {
+            print("More than one account has a session matching \(id): " + matches.map(\.key).joined(separator: ", "))
+            exit(1)
+        }
         do {
-            let running = LiveSessions.scan()[session.id]
+            let running = LiveSessions.scan(profiles: profiles)[session.key].flatMap { $0.hasProcess ? $0 : nil }
             let terminal = Terminal.selected()
             try Terminal.open(Terminal.resumeCommand(for: session), live: running, in: terminal,
                               placement: Prefs.currentPlacement, cwd: session.cwd)

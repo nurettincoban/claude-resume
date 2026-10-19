@@ -52,7 +52,7 @@ struct PreviewPane: View {
             if let live {
                 HStack(spacing: 6) {
                     StatusDot(status: live.status)
-                    Text(live.status == .waiting ? "Needs you · \(live.waitingLabel)" : live.status.label)
+                    Text(!live.statusKnown ? "Running" : live.status == .waiting ? "Needs you · \(live.waitingLabel)" : live.status.label)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(live.status.color)
                 }
@@ -61,6 +61,12 @@ struct PreviewPane: View {
                 .font(.system(size: 15, weight: .semibold))
                 .lineLimit(3)
                 .textSelection(.enabled)
+            if store.profiles.count > 1 {
+                Label(session.profile.label, systemImage: "person.crop.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .help(Fmt.path(session.profile.directory.path))
+            }
             HStack(spacing: 4) {
                 Image(systemName: "folder").font(.system(size: 10))
                 Text(session.projectPath.map(Fmt.path) ?? "Unknown folder")
@@ -170,7 +176,7 @@ struct PreviewPane: View {
                     .padding(.leading, 8)
             }
         }
-        .onChange(of: session.id) { _, _ in showAllLinks = false }
+        .onChange(of: session.key) { _, _ in showAllLinks = false }
     }
 
     private var files: some View {
@@ -215,7 +221,8 @@ struct PreviewPane: View {
     private var actions: some View {
         HStack(spacing: 8) {
             Button { store.open(session) } label: {
-                Label(live == nil ? "Resume" : "Switch to Tab", systemImage: live == nil ? "play.fill" : "arrow.up.forward.app")
+                let running = live?.hasProcess == true
+                Label(running ? "Switch to Tab" : "Resume", systemImage: running ? "arrow.up.forward.app" : "play.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)
@@ -234,10 +241,10 @@ struct PreviewPane: View {
             .help("Resume as a new conversation (⌥↩)")
             Spacer()
             Button { store.togglePin(session) } label: {
-                Image(systemName: store.pinned.contains(session.id) ? "pin.slash" : "pin")
+                Image(systemName: store.pinned.contains(session.key) ? "pin.slash" : "pin")
             }
             .buttonStyle(IconButtonStyle())
-            .help(store.pinned.contains(session.id) ? "Unpin (⌘P)" : "Pin to top (⌘P)")
+            .help(store.pinned.contains(session.key) ? "Unpin (⌘P)" : "Pin to top (⌘P)")
             Button { Prompts.rename(session, store: store) } label: { Image(systemName: "pencil") }
                 .buttonStyle(IconButtonStyle())
                 .help("Rename (⌘E)")

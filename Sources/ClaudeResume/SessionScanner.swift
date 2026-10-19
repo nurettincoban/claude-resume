@@ -47,6 +47,16 @@ struct Session: Identifiable, Hashable, Sendable {
     var lastTurn: TurnSummary?
     /// Shown instead of `cwd` (demo data only, so screenshots never show a real path).
     var displayPath: String?
+    /// The account whose folder the transcript lives in.
+    var profile: AgentProfile = .personal
+    /// Codex resumes by its session ID, which can differ from the thread ID in `id`.
+    var resumeID: String?
+    /// The ID the CLI's resume and fork commands take.
+    var cliID: String { resumeID ?? id }
+
+    /// Identity for the list, pins, hidden sessions and running sessions. `id` stays the
+    /// session ID that `claude --resume` takes.
+    var key: String { profile.sessionKey(id) }
 
     /// The folder as shown and grouped in the UI.
     var projectPath: String? { displayPath ?? cwd }
@@ -101,12 +111,19 @@ final class SessionScanner: @unchecked Sendable {
     }
 
     private let root: URL
+    private let profile: AgentProfile
     private let lock = NSLock()
     private var cache: [String: (stamp: Stamp, session: Session?)] = [:]
     private static let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]
 
     init(root: URL = SessionScanner.defaultRoot) {
         self.root = root
+        profile = .personal
+    }
+
+    init(profile: AgentProfile) {
+        root = profile.projectsRoot
+        self.profile = profile
     }
 
     func scan() -> [Session] {
@@ -156,6 +173,7 @@ final class SessionScanner: @unchecked Sendable {
             TranscriptParser.parse($0, id: file.deletingPathExtension().lastPathComponent,
                                    url: file, modified: stamp.modified)
         }
+        session?.profile = profile
         if session != nil, !subagents.isEmpty {
             var usage = UsageTally()
             for url in subagents {
@@ -501,7 +519,7 @@ enum TranscriptParser {
 
     // MARK: Bytes
 
-    private static func forEachLine(_ raw: UnsafeRawBufferPointer,
+    static func forEachLine(_ raw: UnsafeRawBufferPointer,
                                     _ body: (UnsafeBufferPointer<UInt8>, UnsafeBufferPointer<UInt8>) -> Void) {
         guard let base = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
         let count = raw.count
@@ -518,7 +536,7 @@ enum TranscriptParser {
         }
     }
 
-    private static func decode(_ line: UnsafeBufferPointer<UInt8>) -> [String: Any]? {
+    static func decode(_ line: UnsafeBufferPointer<UInt8>) -> [String: Any]? {
         let data = Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: line.baseAddress!), count: line.count,
                         deallocator: .none)
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -579,7 +597,7 @@ enum TranscriptParser {
         dateLock.withLock { fractional.date(from: string) ?? plain.date(from: string) }
     }
 
-    private static func contains(_ haystack: UnsafeBufferPointer<UInt8>, _ needle: [UInt8]) -> Bool {
+    static func contains(_ haystack: UnsafeBufferPointer<UInt8>, _ needle: [UInt8]) -> Bool {
         firstIndex(of: needle, in: haystack) != nil
     }
 

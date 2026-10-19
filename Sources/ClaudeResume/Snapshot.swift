@@ -26,8 +26,8 @@ enum Snapshot {
         if arguments.contains("--demo") {
             store = SessionStore(demo: Demo.sessions, live: Demo.live, pinned: ["a9"])
         } else {
-            let sessions = SessionScanner().scan()
-            store = SessionStore(demo: sessions, live: LiveSessions.scan())
+            let profiles = ProfilePreferences.load()
+            store = SessionStore(demo: ProfileScanner().scan(profiles), live: LiveSessions.scan(profiles: profiles))
         }
         if let index = arguments.firstIndex(of: "--query"), index + 1 < arguments.count {
             store.query = arguments[index + 1]

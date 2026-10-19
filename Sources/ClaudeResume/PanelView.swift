@@ -96,7 +96,7 @@ struct PanelView: View {
                 Divider().opacity(0.6)
                 Group {
                     if let session = store.selectedSession {
-                        PreviewPane(session: session, live: store.live[session.id])
+                        PreviewPane(session: session, live: store.live[session.key])
                     } else {
                         Text("Nothing selected")
                             .font(.system(size: 12))
@@ -166,6 +166,9 @@ struct ListPane: View {
                 .buttonStyle(.plain)
                 .help("Clear search")
             }
+            if store.profiles.count > 1 {
+                AccountPicker(selection: $store.profileFilter, profiles: store.profiles)
+            }
             ProjectPicker(selection: $store.project, projects: store.projects)
             FilterPills(selection: $store.filter, runningCount: store.live.count)
         }
@@ -178,7 +181,7 @@ struct ListPane: View {
 
     @ViewBuilder
     private var content: some View {
-        let sections = store.sections
+        let sections = store.displayedSections
         if !store.isLoaded {
             ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if sections.isEmpty {
@@ -205,40 +208,46 @@ struct ListPane: View {
                     guard let id, KeyboardState.lastMoveWasKeyboard else { return }
                     proxy.scrollTo(id)
                 }
-                .onChange(of: sections.first?.sessions.first?.id) { _, first in
+                .onChange(of: sections.first?.sessions.first?.key) { _, first in
                     if let first { proxy.scrollTo(first, anchor: .bottom) }
+                }
+                .onChange(of: store.listResetID) { _, _ in
+                    if let first = sections.first?.sessions.first?.key { proxy.scrollTo(first, anchor: .top) }
                 }
             }
         }
     }
 
     private func rows(_ sections: [SessionSection]) -> some View {
-        let terms = Search.terms(store.query)
-        return ForEach(sections) { section in
+        ForEach(sections) { section in
             Section {
-                ForEach(section.sessions) { session in
-                    row(session, terms: terms)
+                ForEach(section.sessions, id: \.key) { session in
+                    row(session)
+                        .onAppear {
+                            if !Snapshot.isActive { store.loadMoreIfNeeded(after: session.key) }
+                        }
                 }
             } header: {
-                SectionHeader(title: section.title, subtitle: section.subtitle, count: section.sessions.count)
+                SectionHeader(title: section.title, subtitle: section.subtitle, count: section.count)
             }
         }
     }
 
-    private func row(_ session: Session, terms: [String]) -> some View {
+    private func row(_ session: Session) -> some View {
         SessionRow(
             session: session,
-            live: store.live[session.id],
-            highlights: terms.isEmpty ? [] : Search.match(session, terms: terms)?.titleRanges ?? [],
-            isSelected: store.selection == session.id,
-            isHovered: hovered == session.id,
-            isPinned: store.pinned.contains(session.id),
-            isHidden: store.hidden.contains(session.id)
+            live: store.live[session.key],
+            highlights: store.highlightRanges(for: session),
+            isSelected: store.selection == session.key,
+            isHovered: hovered == session.key,
+            isPinned: store.pinned.contains(session.key),
+            isHidden: store.hidden.contains(session.key),
+            showsAccount: store.profiles.count > 1
         )
-        .id(session.id)
+        .id(session.key)
         .contentShape(Rectangle())
         .onHover { inside in
-            if inside { hovered = session.id } else if hovered == session.id { hovered = nil }
+            if inside { hovered = session.key } else if hovered == session.key { hovered = nil }
         }
         .onTapGesture { store.open(session) }
         .contextMenu { SessionMenu(session: session) }
@@ -273,7 +282,8 @@ struct ListPane: View {
             : store.visible.count
         let noun = count == 1 ? "conversation" : "conversations"
         let running = store.live.count
-        return running > 0 ? "\(count) \(noun) · \(running) running" : "\(count) \(noun)"
+        let total = store.hasMoreSessions ? "\(store.displayedCount) of \(count) \(noun)" : "\(count) \(noun)"
+        return running > 0 ? "\(total) · \(running) running" : total
     }
 }
 
@@ -287,6 +297,7 @@ struct SessionRow: View {
     let isHovered: Bool
     let isPinned: Bool
     let isHidden: Bool
+    var showsAccount = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -336,6 +347,15 @@ struct SessionRow: View {
 
     private var subtitle: some View {
         HStack(spacing: 4) {
+            if showsAccount {
+                Text(session.profile.label)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+                    .background(Color.primary.opacity(0.07), in: Capsule())
+                    .lineLimit(1)
+                    .help(Fmt.path(session.profile.directory.path))
+            }
             if !session.folderExists {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 9))
@@ -372,7 +392,7 @@ struct SessionRow: View {
     private var trailing: some View {
         VStack(alignment: .trailing, spacing: 3) {
             if isSelected || isHovered {
-                Image(systemName: live == nil ? "return" : "arrow.up.forward.app")
+                Image(systemName: live?.hasProcess == true ? "arrow.up.forward.app" : "return")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(isSelected ? Theme.accent : .secondary)
                     .frame(height: 14)
@@ -494,14 +514,14 @@ struct SessionMenu: View {
     let session: Session
 
     var body: some View {
-        let isLive = store.live[session.id] != nil
+        let isLive = store.live[session.key]?.hasProcess == true
         Button(isLive ? "Switch to Tab" : "Resume in New Tab") { store.open(session, placement: .tab) }
         Button("Resume in New Window") { store.open(session, placement: .window) }
         Button("Fork Conversation") { store.open(session, fork: true) }
         Divider()
-        Button(store.pinned.contains(session.id) ? "Unpin" : "Pin to Top") { store.togglePin(session) }
+        Button(store.pinned.contains(session.key) ? "Unpin" : "Pin to Top") { store.togglePin(session) }
         Button("Rename…") { Prompts.rename(session, store: store) }
-        Button(store.hidden.contains(session.id) ? "Unhide" : "Hide") { store.toggleHidden(session) }
+        Button(store.hidden.contains(session.key) ? "Unhide" : "Hide") { store.toggleHidden(session) }
         if !session.links.isEmpty {
             Divider()
             ForEach(session.links) { link in
@@ -510,13 +530,61 @@ struct SessionMenu: View {
         }
         Divider()
         Button("Copy Resume Command") { store.copyCommand(session) }
-        Button("Copy Session ID") { store.copy(session.id) }
+        Button("Copy Session ID") { store.copy(session.cliID) }
         Button("Open Folder") { store.revealFolder(session) }.disabled(!session.folderExists)
         Button("Show Transcript in Finder") { store.revealTranscript(session) }
         if isLive {
             Divider()
             Button("Quit Session…") { Prompts.quit([session], store: store) }
         }
+    }
+}
+
+struct AccountPicker: View {
+    @Binding var selection: String?
+    let profiles: [AgentProfile]
+
+    var body: some View {
+        if Snapshot.isActive {
+            label.fixedSize()
+        } else {
+            Menu {
+                Button("All Accounts") { selection = nil }
+                Divider()
+                ForEach(profiles) { profile in
+                    Button {
+                        selection = profile.id
+                    } label: {
+                        Text(profile.label)
+                        if selection == profile.id { Image(systemName: "checkmark") }
+                    }
+                    .help(Fmt.path(profile.directory.path))
+                }
+            } label: {
+                label
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Filter by account")
+        }
+    }
+
+    private var label: some View {
+        HStack(spacing: 4) {
+            Image(systemName: selection == nil ? "person.crop.circle" : "person.crop.circle.fill")
+                .font(.system(size: 11, weight: .medium))
+            if let name = profiles.first(where: { $0.id == selection })?.label {
+                Text(name)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                    .frame(maxWidth: 90)
+            }
+        }
+        .foregroundStyle(selection == nil ? .secondary : Theme.accent)
+        .padding(.horizontal, 7)
+        .frame(height: 26)
+        .background(selection == nil ? Color.clear : Theme.accent.opacity(0.12), in: Capsule())
     }
 }
 
@@ -594,7 +662,27 @@ struct SettingsMenu: View {
             Picker("Open Sessions In", selection: $placement) {
                 ForEach(Terminal.Placement.allCases) { Text($0.title).tag($0) }
             }
-            Button("Extra claude Flags…") { Prompts.extraFlags() }
+            Button("Extra claude Flags…") { Prompts.extraFlags(for: .claude) }
+            if store.profiles.contains(where: { $0.provider == .codex }) {
+                Button("Extra codex Flags…") { Prompts.extraFlags(for: .codex) }
+            }
+            Menu("Accounts") {
+                ForEach(store.profiles) { profile in
+                    Menu(profile.label) {
+                        Text(Fmt.path(profile.directory.path))
+                        Button("New Conversation…") { Prompts.newConversation(profile, store: store) }
+                        Button("Sign In…") { store.signIn(profile) }
+                        Button("Show Folder in Finder") { NSWorkspace.shared.open(profile.directory) }
+                            .disabled(!FileManager.default.fileExists(atPath: profile.directory.path))
+                        if !profile.isPersonal {
+                            Divider()
+                            Button("Remove from List…") { Prompts.removeProfile(profile, store: store) }
+                        }
+                    }
+                }
+                Divider()
+                Button("Add Account…") { Prompts.addProfile(store: store) }
+            }
             Divider()
             Toggle("Notify When Claude Finishes", isOn: $notifications)
             Toggle("Show Hidden Conversations (\(store.hiddenCount))", isOn: $store.showHidden)
@@ -785,17 +873,80 @@ struct ErrorBanner: View {
 
 /// Small modal dialogs. They keep the panel open while they're up.
 enum Prompts {
-    @MainActor static func extraFlags() {
-        let current = UserDefaults.standard.string(forKey: Prefs.extraFlags) ?? ""
-        if let value = text(title: "Extra claude flags",
-                            message: "Added to every resume command, for example --model opus or --permission-mode plan.",
-                            value: current, placeholder: "--model opus", button: "Save") {
-            UserDefaults.standard.set(value.trimmingCharacters(in: .whitespaces), forKey: Prefs.extraFlags)
+    @MainActor static func extraFlags(for provider: AgentProvider) {
+        let key = provider == .claude ? Prefs.extraFlags : Prefs.extraCodexFlags
+        let message = provider == .claude
+            ? "Added to every resume command, for example --model opus or --permission-mode plan."
+            : "Added to every codex resume and fork command, for example --model or --sandbox."
+        if let value = text(title: "Extra \(provider.executable) flags", message: message,
+                            value: Prefs.flags(for: provider),
+                            placeholder: provider == .claude ? "--model opus" : "--model <model>", button: "Save") {
+            UserDefaults.standard.set(value.trimmingCharacters(in: .whitespaces), forKey: key)
         }
     }
 
+    @MainActor static func addProfile(store: SessionStore) {
+        let alert = NSAlert()
+        alert.messageText = "Add account"
+        alert.informativeText = "Each account keeps its own login and history in its own folder. "
+            + "Point to an existing folder, or leave it blank to create one when you sign in. "
+            + "For Codex, a blank folder means ~/.codex if it isn't in the list yet."
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 92))
+        let provider = NSPopUpButton(frame: NSRect(x: 0, y: 66, width: 300, height: 26))
+        provider.addItems(withTitles: AgentProvider.allCases.map(\.title))
+        let name = NSTextField(frame: NSRect(x: 0, y: 34, width: 300, height: 24))
+        name.placeholderString = "Name, e.g. Work"
+        let directory = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        directory.placeholderString = "Folder, e.g. ~/.claude-work or ~/.codex"
+        container.addSubview(provider)
+        container.addSubview(name)
+        container.addSubview(directory)
+        alert.accessoryView = container
+        alert.window.initialFirstResponder = name
+        alert.addButton(withTitle: "Add Account")
+        alert.addButton(withTitle: "Cancel")
+        guard run(alert) == .alertFirstButtonReturn else { return }
+        let selected = AgentProvider.allCases[max(0, provider.indexOfSelectedItem)]
+        let path = directory.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let defaultCodexTaken = store.profiles.contains { $0.provider == .codex && $0.usesDefaultFolder }
+        let folder = !path.isEmpty ? path
+            : selected == .codex && !defaultCodexTaken ? AgentProfile.defaultCodexDirectory.path
+            : "~/.\(selected.executable)-accounts/\(UUID().uuidString.prefix(8).lowercased())"
+        if let profile = store.addProfile(name: name.stringValue, directory: folder, provider: selected) {
+            store.profileFilter = profile.id
+        }
+    }
+
+    @MainActor static func removeProfile(_ profile: AgentProfile, store: SessionStore) {
+        let alert = NSAlert()
+        alert.messageText = "Remove “\(profile.name)” from the list?"
+        alert.informativeText = "Its login and conversations stay in \(Fmt.path(profile.directory.path)). "
+            + "You can add the folder again later."
+        alert.addButton(withTitle: "Remove from List")
+        alert.addButton(withTitle: "Cancel")
+        if run(alert) == .alertFirstButtonReturn { store.removeProfile(profile) }
+    }
+
+    @MainActor static func newConversation(_ profile: AgentProfile, store: SessionStore) {
+        let panel = NSOpenPanel()
+        panel.title = "New conversation · \(profile.name)"
+        panel.message = "Choose the project folder for the conversation."
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Start"
+        NSApp.activate()
+        isShowing = true
+        let response = panel.runModal()
+        isShowing = false
+        NotificationCenter.default.post(name: .promptDidClose, object: nil)
+        if response == .OK, let folder = panel.url { store.newConversation(profile, cwd: folder) }
+    }
+
     @MainActor static func rename(_ session: Session, store: SessionStore) {
-        let message = store.live[session.id] == nil
+        let message = session.profile.provider == .codex
+            ? "The new name is saved to Codex, so codex resume shows it too. Codex needs to be running."
+            : store.live[session.key] == nil
             ? "The new name is saved in the transcript, so claude --resume shows it too."
             : "This session is running. ClaudeResume shows the new name now and saves it to the transcript once the session stops."
         if let value = text(title: "Rename conversation", message: message, value: session.title,
@@ -812,7 +963,7 @@ enum Prompts {
         } else {
             alert.messageText = "Quit \(sessions.count) idle sessions?"
         }
-        let busy = sessions.filter { store.live[$0.id]?.status == .busy }.count
+        let busy = sessions.filter { store.live[$0.key]?.status == .busy }.count
         var info = "The Claude Code processes stop. The conversations stay saved and you can resume them any time."
         if busy > 0 { info += "\n\nClaude is still working in \(busy == 1 ? "this session" : "\(busy) of them")." }
         if sessions.count > 1 {

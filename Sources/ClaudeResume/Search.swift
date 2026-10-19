@@ -49,7 +49,8 @@ enum Search {
 
     /// Everything searchable besides the title, folder and branch.
     static func haystack(_ session: Session) -> String {
-        var parts = [session.firstPrompt, session.lastPrompt, session.recap, session.cwd, session.id].compactMap { $0 }
+        var parts = [session.firstPrompt, session.lastPrompt, session.recap, session.cwd, session.id,
+                     session.profile.isPersonal ? nil : session.profile.name].compactMap { $0 }
         parts += session.links.map(\.detail)
         parts += session.filesChanged.map { URL(fileURLWithPath: $0).lastPathComponent }
         return parts.joined(separator: "\n")

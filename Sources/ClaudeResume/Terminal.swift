@@ -42,6 +42,43 @@ enum Terminal {
         ITerm.resumeCommand(for: session, fork: fork, extraFlags: extraFlags)
     }
 
+    /// `claude` for Personal, exactly as before. Other accounts get their own config folder, and
+    /// credentials from the shell are dropped so they can't sign in as a different account.
+    static func claude(for profile: AgentProfile) -> String {
+        guard !profile.isPersonal else { return "claude" }
+        return "env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN "
+            + "CLAUDE_CONFIG_DIR=\(ITerm.shellQuote(profile.directory.path)) claude"
+    }
+
+    /// `codex` with the account's `CODEX_HOME`. `marker` is the `Session.key` ClaudeResume uses to
+    /// find the client it launched. As with Claude, `~/.codex` keeps your shell's credentials.
+    static func codex(for profile: AgentProfile, marker: String? = nil) -> String {
+        // `env` takes its -u options before any assignment.
+        var unset: [String] = [], set: [String] = []
+        if !profile.usesDefaultFolder {
+            unset += ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN"]
+            set.append("CODEX_HOME=\(ITerm.shellQuote(profile.directory.path))")
+        }
+        if let marker {
+            set.append("\(CodexRuntime.sessionMarker)=\(ITerm.shellQuote(marker))")
+        } else {
+            unset.append(CodexRuntime.sessionMarker)
+        }
+        return (["env"] + unset.map { "-u \($0)" } + set + ["codex"]).joined(separator: " ")
+    }
+
+    static func loginCommand(for profile: AgentProfile) -> String {
+        switch profile.provider {
+        case .claude: "\(claude(for: profile)) auth login"
+        case .codex: "\(codex(for: profile)) login"
+        }
+    }
+
+    static func newCommand(for profile: AgentProfile, cwd: String) -> String {
+        let agent = profile.provider == .claude ? claude(for: profile) : codex(for: profile)
+        return "cd \(ITerm.shellQuote(cwd)) && \(agent)"
+    }
+
     static func run(_ command: String, in kind: Kind, placement: Placement, cwd: String? = nil) throws {
         guard kind.isInstalled else { throw Failure(message: "\(kind.title) isn't installed.") }
         switch kind {

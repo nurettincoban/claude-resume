@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Accounts**: add more Claude Code config folders (`CLAUDE_CONFIG_DIR`) in **⋯ → Accounts**
+  and see their conversations in the same list, with an account filter next to the search
+  field. Sessions from added accounts resume with their own folder and without the API keys or
+  tokens from your shell. The default `~/.claude` account works exactly as before, and with
+  only one account nothing in the panel changes.
+- **Codex** (optional): add a Codex account (`CODEX_HOME`, `~/.codex` by default) to list its
+  conversations, resume them with `codex resume` and fork them with `codex fork`. Working,
+  idle and waiting states come from Codex's local app-server when it's running. Without it,
+  history still works, and Codex conversations ClaudeResume started show as running with an
+  unknown status that never counts as working.
+
+### Changed
+
+- The list shows 50 conversations at a time and loads more as you scroll. Search, filters,
+  grouping and keyboard navigation still cover every conversation, and the footer reads
+  "50 of 320 conversations" until the rest are loaded.
+- Search and grouping results are computed once per change instead of on every hover or
+  selection, which keeps long lists responsive.
+
+### Fixed
+
+- Hiding the selected conversation moves the selection to the next one.
+
 ## [1.2.0] - 2026-10-19
 
 ### Added

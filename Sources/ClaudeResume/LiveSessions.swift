@@ -14,6 +14,9 @@ struct LiveSession: Hashable, Sendable {
     var statusSince: Date?
     /// Why a waiting session is waiting, as Claude Code words it (e.g. "input needed").
     var waitingFor: String?
+    /// False for a Codex client found without its app-server: it runs, but whether it's working
+    /// is unknown. It shows as idle and never counts as busy.
+    var statusKnown = true
 
     /// The controlling terminal, e.g. `/dev/ttys012`, used to find the process's iTerm2 tab.
     var tty: String? { LiveSessions.tty(of: pid) }
@@ -31,6 +34,10 @@ extension LiveSession.Status {
 }
 
 extension LiveSession {
+    /// Whether there's a process of ours to switch to or quit. A Codex conversation loaded in
+    /// another Codex client has none.
+    var hasProcess: Bool { pid > 0 }
+
     /// `waitingFor` as a sentence-case label, e.g. "Input needed".
     var waitingLabel: String {
         guard let reason = waitingFor else { return "Needs your input" }
@@ -78,6 +85,19 @@ enum LiveSessions {
             if value.starts(with: prefix) { return String(bytes: value.dropFirst(prefix.count), encoding: .utf8) }
         }
         return nil
+    }
+
+    /// Running sessions across accounts, keyed by `Session.key`.
+    static func scan(profiles: [AgentProfile]) -> [String: LiveSession] {
+        var result: [String: LiveSession] = [:]
+        for profile in profiles {
+            if profile.provider == .codex {
+                result.merge(CodexRuntime.scan(profile)) { _, new in new }
+                continue
+            }
+            for (id, live) in scan(root: profile.sessionsRoot) { result[profile.sessionKey(id)] = live }
+        }
+        return result
     }
 
     /// Running sessions keyed by session id. Registry files left behind by crashed processes are ignored.
