@@ -4,6 +4,8 @@ import SwiftUI
 enum Theme {
     static let accent = Color(red: 0.851, green: 0.467, blue: 0.341) // Claude coral
     static let live = Color(red: 0.30, green: 0.75, blue: 0.45)
+    /// Sessions blocked on a permission prompt or question.
+    static let attention = Color(red: 0.96, green: 0.65, blue: 0.14)
     static let listWidth: CGFloat = 440
     static let previewWidth: CGFloat = 400
     static let height: CGFloat = 560
@@ -45,6 +47,35 @@ enum Fmt {
         let style = FloatingPointFormatStyle<Double>.Currency(code: "USD", locale: Locale(identifier: "en_US"))
         if value > 0, value < 0.01 { return "<$0.01" }
         return value.formatted(style.precision(.fractionLength(value >= 100 ? 0 : 2)))
+    }
+
+    /// A session's cost, with `≈` when it's our estimate rather than Claude Code's recorded total.
+    static func cost(_ session: Session) -> String? {
+        session.cost.map { (session.costIsEstimate ? "≈" : "") + usd($0) }
+    }
+
+    static func costHelp(_ session: Session) -> String {
+        session.costIsEstimate
+            ? "Estimated: the session's tokens, subagents included, at API list prices. Not what a subscription bills."
+            : "Claude Code's own recorded total for this session, at API prices."
+    }
+
+    /// "4m 12s · 6 edits · 1 error · +$0.84", leaving out parts that are zero or unknown.
+    static func turn(_ turn: TurnSummary) -> String {
+        var parts: [String] = []
+        if let duration = turn.duration { parts.append(precise(duration)) }
+        if turn.edits > 0 { parts.append(turn.edits == 1 ? "1 edit" : "\(turn.edits) edits") }
+        if turn.errors > 0 { parts.append(turn.errors == 1 ? "1 error" : "\(turn.errors) errors") }
+        if let cost = turn.cost, cost > 0 { parts.append("+≈" + usd(cost)) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// `45s`, `4m 12s`, `1h 5m`: seconds matter for a single turn.
+    static func precise(_ interval: TimeInterval) -> String {
+        let seconds = max(0, Int(interval.rounded()))
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3600 { return "\(seconds / 60)m \(seconds % 60)s" }
+        return duration(interval)
     }
 
     /// `~/code/app` instead of `/Users/me/code/app`.
@@ -112,10 +143,15 @@ struct ListPane: View {
                 .foregroundStyle(.secondary)
             if Snapshot.isActive {
                 // ImageRenderer can't draw AppKit-backed text fields.
-                Text(store.query.isEmpty ? "Search conversations" : store.query)
-                    .font(.system(size: 15))
-                    .foregroundStyle(store.query.isEmpty ? .tertiary : .primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 1) {
+                    Text(store.query.isEmpty ? "Search conversations" : store.query)
+                        .foregroundStyle(store.query.isEmpty ? .tertiary : .primary)
+                    if !store.query.isEmpty {
+                        Rectangle().fill(Theme.accent).frame(width: 1.5, height: 18)
+                    }
+                }
+                .font(.system(size: 15))
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 TextField("Search conversations", text: $store.query)
                     .textFieldStyle(.plain)
@@ -317,9 +353,16 @@ struct SessionRow: View {
                     .truncationMode(.middle)
             }
             Text("·").foregroundStyle(.quaternary)
-            Text(Fmt.prompts(session.promptCount))
-                .foregroundStyle(.tertiary)
-                .layoutPriority(1)
+            if let live, live.status == .waiting {
+                // What Claude is blocked on matters more than the prompt count.
+                Text(live.waitingLabel)
+                    .foregroundStyle(Theme.attention)
+                    .layoutPriority(1)
+            } else {
+                Text(Fmt.prompts(session.promptCount))
+                    .foregroundStyle(.tertiary)
+                    .layoutPriority(1)
+            }
         }
         .font(.system(size: 11))
         .lineLimit(1)
@@ -338,7 +381,7 @@ struct SessionRow: View {
                     .foregroundStyle(.tertiary)
                     .frame(height: 14)
             }
-            Text(session.cost.map(Fmt.usd) ?? " ")
+            Text(Fmt.cost(session) ?? " ")
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(.tertiary)
         }
@@ -412,12 +455,33 @@ struct StatusDot: View {
                 Circle().fill(Theme.accent).frame(width: 7, height: 7)
             case .idle:
                 Circle().fill(Theme.live).frame(width: 7, height: 7)
+            case .waiting:
+                Circle().strokeBorder(Theme.attention.opacity(0.45), lineWidth: 1.5).frame(width: 13, height: 13)
+                Circle().fill(Theme.attention).frame(width: 7, height: 7)
             case nil:
                 EmptyView()
             }
         }
         .frame(width: 14, height: 14)
-        .help(status == .busy ? "Running · working" : status == .idle ? "Running · waiting for you" : "")
+        .help(status?.label ?? "")
+    }
+}
+
+extension LiveSession.Status {
+    var label: String {
+        switch self {
+        case .busy: "Working"
+        case .idle: "Idle"
+        case .waiting: "Needs you"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .busy: Theme.accent
+        case .idle: Theme.live
+        case .waiting: Theme.attention
+        }
     }
 }
 

@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Needs you**: sessions blocked on a permission prompt or a question (Claude Code's `waiting`
+  status) get an amber dot with the reason, a section at the top of the list, an amber menu
+  bar badge and a notification. Before, they looked idle.
+- **Last turn** in the preview: duration, edits, tool errors and the turn's estimated cost.
+  The "Claude finished" notification shows the same summary.
+- An animated demo at the top of the README, rendered from demo data with `--gif`.
+
+### Changed
+
+- Estimated costs are marked `≈`. A figure without it is Claude Code's own recorded total.
+- An idle session's status reads "Idle" instead of "Waiting for you", which now means a
+  session that's blocked on you.
+
+### Fixed
+
+- When Claude Code had recorded its own total, subagent costs were added on top of it a second time.
+
 ## [1.1.0] - 2026-10-19
 
 ### Added

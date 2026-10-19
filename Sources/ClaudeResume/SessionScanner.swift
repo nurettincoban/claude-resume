@@ -37,10 +37,14 @@ struct Session: Identifiable, Hashable, Sendable {
     /// Tokens processed across the session and its subagents, cache reads included.
     var tokens: Int = 0
     var outputTokens: Int = 0
-    /// API-equivalent cost in USD: Claude Code's own total when it recorded one, else an estimate.
-    var cost: Double?
+    /// Claude Code's own recorded total (`cost-state`), subagents included. Can be older than the transcript.
+    var recordedCost: Double?
+    /// Our estimate from token usage at list prices, subagents included.
+    var estimatedCost: Double?
     /// Display names of the models used, most used first.
     var models: [String] = []
+    /// The running turn, or the last one: everything since the latest prompt you typed.
+    var lastTurn: TurnSummary?
     /// Shown instead of `cwd` (demo data only, so screenshots never show a real path).
     var displayPath: String?
 
@@ -59,8 +63,29 @@ struct Session: Identifiable, Hashable, Sendable {
         return FileManager.default.fileExists(atPath: cwd, isDirectory: &isDir) && isDir.boolValue
     }
 
+    /// API-equivalent cost in USD: the larger of the recorded total and the estimate.
+    var cost: Double? { [recordedCost, estimatedCost].compactMap { $0 }.max() }
+
+    /// True unless the figure shown is Claude Code's own recorded total.
+    var costIsEstimate: Bool {
+        guard let recordedCost else { return true }
+        return (estimatedCost ?? 0) > recordedCost
+    }
+
     var pullRequests: [SessionLink] { links.filter { $0.kind == .pullRequest } }
     var artifacts: [SessionLink] { links.filter { $0.kind == .artifact } }
+}
+
+/// What happened since the latest prompt you typed.
+struct TurnSummary: Hashable, Sendable {
+    /// Claude Code's recorded turn duration, or the time from the prompt to the last reply.
+    var duration: TimeInterval?
+    /// Edit, Write, MultiEdit and NotebookEdit calls.
+    var edits = 0
+    /// Tool calls that returned an error.
+    var errors = 0
+    /// Estimated API cost of the turn's main-session requests.
+    var cost: Double?
 }
 
 /// Scans the transcript folder, re-parsing only sessions whose files changed.
@@ -178,7 +203,7 @@ private extension Session {
     mutating func addSubagentUsage(_ usage: UsageTally) {
         tokens += usage.tokens
         outputTokens += usage.output
-        if let extra = usage.cost { cost = (cost ?? 0) + extra }
+        if let extra = usage.cost { estimatedCost = (estimatedCost ?? 0) + extra }
     }
 }
 
@@ -199,6 +224,8 @@ enum TranscriptParser {
     private static let frameLinkMarker = Array(#""type":"frame-link""#.utf8)
     private static let costStateMarker = Array(#""type":"cost-state""#.utf8)
     private static let awayMarker = Array(#""subtype":"away_summary""#.utf8)
+    private static let turnDurationMarker = Array(#""subtype":"turn_duration""#.utf8)
+    private static let isErrorMarker = Array(#""is_error":true"#.utf8)
     private static let toolResultMarker = Array(#""tool_result""#.utf8)
     private static let sidechainMarker = Array(#""isSidechain":true"#.utf8)
     private static let timestampMarker = Array(#""timestamp":""#.utf8)
@@ -222,6 +249,9 @@ enum TranscriptParser {
         var linkOrder: [String] = []
         var recordedCost: Double?
         var usage = UsageTally()
+        // The current turn: reset by every prompt you type.
+        var turnUsage = UsageTally(), turnEdits = 0, turnErrors = 0
+        var turnDuration: TimeInterval?, turnStarted: Date?
 
         data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
             var lastReplyLine: UnsafeBufferPointer<UInt8>?
@@ -250,27 +280,45 @@ enum TranscriptParser {
                     if let value = decode(line)?["totalCostUSD"] as? Double { recordedCost = max(recordedCost ?? 0, value) }
                 } else if contains(head, userMarker) {
                     guard !contains(head, sidechainMarker) else { return }
-                    if let stamp = timestamp(in: line) {
+                    let stamp = timestamp(in: line)
+                    if let stamp {
                         startedAt = startedAt ?? stamp
                         lastActivity = stamp
                     }
-                    guard line.count <= maxDecodedLine, !contains(head, toolResultMarker),
-                          let entry = decode(line) else { return }
+                    if contains(head, toolResultMarker) {
+                        if contains(line, isErrorMarker) { turnErrors += 1 }
+                        return
+                    }
+                    guard line.count <= maxDecodedLine, let entry = decode(line) else { return }
                     if let value = entry["cwd"] as? String, !value.isEmpty { cwd = cwd ?? value }
                     if let value = entry["gitBranch"] as? String, !value.isEmpty, value != "HEAD" { branch = value }
-                    if let prompt = humanPrompt(entry) { prompts.append(prompt) }
+                    if let prompt = humanPrompt(entry) {
+                        prompts.append(prompt)
+                        turnUsage = UsageTally()
+                        turnEdits = 0
+                        turnErrors = 0
+                        turnDuration = nil
+                        turnStarted = stamp
+                    }
                 } else if contains(head, assistantMarker) {
                     guard !contains(head, sidechainMarker) else { return }
                     if let stamp = timestamp(in: line) { lastActivity = stamp }
-                    tally(line, head: head, into: &usage)
+                    if let response = usageEntry(line, head: head) {
+                        usage.add(key: response.key, model: response.model, usage: response.values)
+                        turnUsage.add(key: response.key, model: response.model, usage: response.values)
+                    }
                     if contains(head, textReplyMarker) { lastReplyLine = line }
                     if contains(line, toolUseMarker) {
-                        for path in editedFiles(in: line) {
+                        let edited = editedFiles(in: line)
+                        turnEdits += edited.count
+                        for path in edited {
                             files.removeAll { $0 == path }
                             files.insert(path, at: 0)
                         }
                         if files.count > maxFiles { files.removeLast(files.count - maxFiles) }
                     }
+                } else if contains(head, turnDurationMarker) {
+                    if let ms = decode(line)?["durationMs"] as? NSNumber { turnDuration = ms.doubleValue / 1000 }
                 } else if contains(head, awayMarker) {
                     if let value = decode(line)?["content"] as? String {
                         recap = clean(value.replacingOccurrences(of: "(disable recaps in /config)", with: ""))
@@ -286,7 +334,10 @@ enum TranscriptParser {
         }
 
         guard let first = prompts.first else { return nil }
-        let estimated = usage.cost
+        var elapsed: TimeInterval?
+        if let turnStarted, let lastActivity { elapsed = max(0, lastActivity.timeIntervalSince(turnStarted)) }
+        let lastTurn = TurnSummary(duration: turnDuration ?? elapsed, edits: turnEdits, errors: turnErrors,
+                                   cost: turnUsage.cost)
         let ranked = usage.byModel.sorted { $0.value.output > $1.value.output }.map { ModelCatalog.displayName($0.key) }
         var models: [String] = []
         for name in ranked where !models.contains(name) { models.append(name) }
@@ -311,9 +362,10 @@ enum TranscriptParser {
             links: links,
             tokens: usage.tokens,
             outputTokens: usage.output,
-            // Claude Code's recorded total can be older than the transcript, so take the larger.
-            cost: [recordedCost, estimated].compactMap { $0 }.max(),
-            models: models
+            recordedCost: recordedCost,
+            estimatedCost: usage.cost,
+            models: models,
+            lastTurn: lastTurn
         )
     }
 
@@ -321,7 +373,8 @@ enum TranscriptParser {
     static func tallyUsage(_ data: Data, into usage: inout UsageTally) {
         data.withUnsafeBytes { raw in
             forEachLine(raw) { line, head in
-                if contains(head, assistantMarker) { tally(line, head: head, into: &usage) }
+                guard contains(head, assistantMarker), let response = usageEntry(line, head: head) else { return }
+                usage.add(key: response.key, model: response.model, usage: response.values)
             }
         }
     }
@@ -345,13 +398,15 @@ enum TranscriptParser {
         return SessionLink(kind: .artifact, url: url, label: title, detail: "Artifact · \(title)")
     }
 
-    private static func tally(_ line: UnsafeBufferPointer<UInt8>, head: UnsafeBufferPointer<UInt8>, into usage: inout UsageTally) {
+    /// A response's model, dedupe key and `usage` block, read from the raw line.
+    private static func usageEntry(_ line: UnsafeBufferPointer<UInt8>, head: UnsafeBufferPointer<UInt8>)
+        -> (key: String, model: String, values: [String: Any])? {
         guard let model = string(after: modelMarker, in: head),
               let object = objectBytes(afterLast: usageMarker, in: line),
-              let values = (try? JSONSerialization.jsonObject(with: object)) as? [String: Any] else { return }
+              let values = (try? JSONSerialization.jsonObject(with: object)) as? [String: Any] else { return nil }
         let messageId = string(after: messageIdMarker, in: head) ?? ""
         let requestId = string(after: requestIdMarker, in: line, last: true) ?? ""
-        usage.add(key: "\(messageId)|\(requestId)", model: model, usage: values)
+        return ("\(messageId)|\(requestId)", model, values)
     }
 
     private static func editedFiles(in line: UnsafeBufferPointer<UInt8>) -> [String] {

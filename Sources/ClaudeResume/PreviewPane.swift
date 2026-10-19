@@ -52,9 +52,9 @@ struct PreviewPane: View {
             if let live {
                 HStack(spacing: 6) {
                     StatusDot(status: live.status)
-                    Text(live.status == .busy ? "Working" : "Waiting for you")
+                    Text(live.status == .waiting ? "Needs you · \(live.waitingLabel)" : live.status.label)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(live.status == .busy ? Theme.accent : Theme.live)
+                        .foregroundStyle(live.status.color)
                 }
             }
             Text(session.title)
@@ -82,8 +82,7 @@ struct PreviewPane: View {
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 0) {
                 Stat(value: "\(session.promptCount)", label: session.promptCount == 1 ? "prompt" : "prompts")
-                Stat(value: session.cost.map(Fmt.usd) ?? "–", label: "API cost",
-                     help: "What this session would cost at API list prices, subagents included.")
+                Stat(value: Fmt.cost(session) ?? "–", label: "API cost", help: Fmt.costHelp(session))
                 Stat(value: Fmt.compact(session.tokens), label: "tokens",
                      help: "\(Fmt.compact(session.outputTokens)) output tokens. The total includes cache reads.")
                 Stat(value: Fmt.age(session.lastActivity), label: "last active")
@@ -98,7 +97,42 @@ struct PreviewPane: View {
             .font(.system(size: 10))
             .foregroundStyle(.tertiary)
             .lineLimit(1)
+            if let turn = session.lastTurn, turn.duration != nil || turn.edits > 0 {
+                lastTurn(turn)
+            }
         }
+    }
+
+    /// Flightdeck-style receipt for the running or last turn.
+    private func lastTurn(_ turn: TurnSummary) -> some View {
+        HStack(spacing: 10) {
+            Text(live?.status == .busy ? "THIS TURN" : "LAST TURN")
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(0.5)
+                .foregroundStyle(.secondary)
+            if let duration = turn.duration {
+                Label(Fmt.precise(duration), systemImage: "clock")
+            }
+            if turn.edits > 0 {
+                Label("\(turn.edits)", systemImage: "pencil").help(turn.edits == 1 ? "1 edit" : "\(turn.edits) edits")
+            }
+            if turn.errors > 0 {
+                Label("\(turn.errors)", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                    .help(turn.errors == 1 ? "1 tool error" : "\(turn.errors) tool errors")
+            }
+            if let cost = turn.cost, cost > 0 {
+                Text("+≈" + Fmt.usd(cost)).help("Estimated API cost of this turn's main-session requests")
+            }
+            Spacer(minLength: 0)
+        }
+        .labelStyle(TurnLabelStyle())
+        .font(.system(size: 11).monospacedDigit())
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .frame(height: 26)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .padding(.top, 4)
     }
 
     private var links: some View {
@@ -256,6 +290,15 @@ private struct Block<Content: View>: View {
         }
         .padding(10)
         .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct TurnLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 3) {
+            configuration.icon.font(.system(size: 9, weight: .semibold))
+            configuration.title
+        }
     }
 }
 

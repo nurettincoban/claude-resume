@@ -3,7 +3,8 @@ import Foundation
 
 /// A Claude Code process that is running right now, from `~/.claude/sessions/<pid>.json`.
 struct LiveSession: Hashable, Sendable {
-    enum Status: String, Sendable { case busy, idle }
+    /// `waiting` means Claude is blocked on you: a permission prompt or a question.
+    enum Status: String, Sendable { case busy, idle, waiting }
 
     let sessionId: String
     let pid: pid_t
@@ -11,9 +12,30 @@ struct LiveSession: Hashable, Sendable {
     let cwd: String?
     /// When the status last changed.
     var statusSince: Date?
+    /// Why a waiting session is waiting, as Claude Code words it (e.g. "input needed").
+    var waitingFor: String?
 
     /// The controlling terminal, e.g. `/dev/ttys012`, used to find the process's iTerm2 tab.
     var tty: String? { LiveSessions.tty(of: pid) }
+}
+
+extension LiveSession.Status {
+    /// Which status to show when two processes claim one session.
+    var urgency: Int {
+        switch self {
+        case .waiting: 2
+        case .busy: 1
+        case .idle: 0
+        }
+    }
+}
+
+extension LiveSession {
+    /// `waitingFor` as a sentence-case label, e.g. "Input needed".
+    var waitingLabel: String {
+        guard let reason = waitingFor else { return "Needs your input" }
+        return reason.prefix(1).uppercased() + reason.dropFirst()
+    }
 }
 
 enum LiveSessions {
@@ -74,10 +96,12 @@ enum LiveSessions {
                 pid: pid,
                 status: LiveSession.Status(rawValue: entry["status"] as? String ?? "") ?? .idle,
                 cwd: entry["cwd"] as? String,
-                statusSince: (entry["statusUpdatedAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
+                statusSince: (entry["statusUpdatedAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) },
+                waitingFor: (entry["waitingFor"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             )
-            // Two processes can claim one session (a resume next to the original); busy wins.
-            if let existing = result[id], existing.status == .busy { continue }
+            // Two processes can claim one session (a resume next to the original); the one that
+            // needs attention wins.
+            if let existing = result[id], existing.status.urgency >= live.status.urgency { continue }
             result[id] = live
         }
         return result

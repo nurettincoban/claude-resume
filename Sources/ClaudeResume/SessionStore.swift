@@ -73,10 +73,13 @@ final class SessionStore {
     /// Only show sessions from this folder.
     var project: String? { didSet { if project != oldValue { selectFirst() } } }
     var grouping: Grouping = Grouping(rawValue: UserDefaults.standard.string(forKey: Prefs.grouping) ?? "") ?? .date {
-        didSet { UserDefaults.standard.set(grouping.rawValue, forKey: Prefs.grouping); selectFirst() }
+        didSet {
+            if persists { UserDefaults.standard.set(grouping.rawValue, forKey: Prefs.grouping) }
+            selectFirst()
+        }
     }
     var showHidden = UserDefaults.standard.bool(forKey: Prefs.showHidden) {
-        didSet { UserDefaults.standard.set(showHidden, forKey: Prefs.showHidden) }
+        didSet { if persists { UserDefaults.standard.set(showHidden, forKey: Prefs.showHidden) } }
     }
     var previewOpen = false
     var selection: Session.ID?
@@ -101,6 +104,8 @@ final class SessionStore {
     private var busySince: [String: Date] = [:]
     /// Sessions that just finished a turn, notified once the rescan has their latest reply.
     private(set) var finished: [String: TimeInterval] = [:]
+    /// Sessions that just started waiting for permission or an answer.
+    private(set) var needsInput: Set<String> = []
 
     init(scanner: SessionScanner = SessionScanner(), liveRoot: URL = LiveSessions.defaultRoot) {
         self.scanner = scanner
@@ -128,6 +133,7 @@ final class SessionStore {
     }
 
     var anyBusy: Bool { live.values.contains { $0.status == .busy } }
+    var waitingCount: Int { live.values.filter { $0.status == .waiting }.count }
 
     // MARK: Refresh
 
@@ -169,13 +175,17 @@ final class SessionStore {
         }
     }
 
-    /// Notices sessions going from busy to idle, so they can be announced after the next scan.
+    /// Notices sessions finishing a turn (busy → idle) or starting to wait for you, so they can
+    /// be announced after the next scan. A wait for permission doesn't end the turn.
     func trackTurns(_ next: [String: LiveSession], now: Date = Date()) {
         for (id, session) in next {
-            if session.status == .busy {
+            switch session.status {
+            case .busy:
                 if busySince[id] == nil { busySince[id] = session.statusSince ?? now }
-            } else if let since = busySince.removeValue(forKey: id) {
-                finished[id] = now.timeIntervalSince(since)
+            case .waiting:
+                if live[id]?.status != .waiting { needsInput.insert(id) }
+            case .idle:
+                if let since = busySince.removeValue(forKey: id) { finished[id] = now.timeIntervalSince(since) }
             }
         }
         // Exited while busy (quit or crashed): nothing to announce.
@@ -198,17 +208,26 @@ final class SessionStore {
     static let minimumTurn: TimeInterval = 20
 
     private func announceFinished() {
-        let done = finished
+        let done = finished, waiting = needsInput
         finished = [:]
+        needsInput = []
         guard UserDefaults.standard.bool(forKey: Prefs.notifications) else { return }
         for (id, duration) in done where duration >= Self.minimumTurn {
-            guard let session = sessions.first(where: { $0.id == id }) else { continue }
-            let running = live[id]
-            launchQueue.async {
-                // Skip it when that tab is already in front of you.
-                if let running, let terminal = Terminal.id(for: running), Terminal.frontmostID() == terminal { return }
-                DispatchQueue.main.async { Notifier.shared.post(session, duration: duration) }
-            }
+            guard let session = session(id) else { continue }
+            notifyUnlessInFront(live[id]) { Notifier.shared.post(session, duration: duration) }
+        }
+        // Every wait is worth a notification, however short the turn: Claude is stuck until you answer.
+        for id in waiting {
+            guard let session = session(id), let running = live[id], running.status == .waiting else { continue }
+            notifyUnlessInFront(running) { Notifier.shared.postNeedsInput(session, reason: running.waitingLabel) }
+        }
+    }
+
+    /// Posts unless the session's tab is already in front of you.
+    private func notifyUnlessInFront(_ running: LiveSession?, _ post: @escaping @MainActor () -> Void) {
+        launchQueue.async {
+            if let running, let terminal = Terminal.id(for: running), Terminal.frontmostID() == terminal { return }
+            DispatchQueue.main.async { MainActor.assumeIsolated { post() } }
         }
     }
 
@@ -222,9 +241,15 @@ final class SessionStore {
                 .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.lastActivity > $1.0.lastActivity }
             return matches.isEmpty ? [] : [SessionSection(id: "results", title: "Results", sessions: matches.map(\.0))]
         }
-        let pinnedSessions = base.filter { pinned.contains($0.id) }
-        let rest = base.filter { !pinned.contains($0.id) }
+        // Sessions blocked on you come first, whatever the grouping.
+        let waiting = base.filter { live[$0.id]?.status == .waiting }
+        let waitingIds = Set(waiting.map(\.id))
+        let pinnedSessions = base.filter { pinned.contains($0.id) && !waitingIds.contains($0.id) }
+        let rest = base.filter { !pinned.contains($0.id) && !waitingIds.contains($0.id) }
         var result: [SessionSection] = []
+        if !waiting.isEmpty {
+            result.append(SessionSection(id: "waiting", title: "Needs you", sessions: waiting))
+        }
         if !pinnedSessions.isEmpty {
             result.append(SessionSection(id: "pinned", title: "Pinned", sessions: pinnedSessions))
         }

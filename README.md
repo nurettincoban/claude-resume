@@ -16,11 +16,11 @@ running, and resumes any of them in iTerm2 or Ghostty, in the right folder, with
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
-  <img src="docs/screenshot-light.png" width="840" alt="ClaudeResume panel: conversations grouped by day with folder, branch, prompt count, age, cost and merge request chips, and a preview pane showing the selected session's recap, links and Claude's last reply">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/demo-dark.gif">
+  <img src="docs/demo.gif" width="905" alt="ClaudeResume demo: a session that needs permission sits on top in amber, the arrow keys move through conversations grouped by day, the preview pane shows the last turn, recap, links and Claude's reply, a loose search for 'chkout flw' highlights 'checkout flow', then the list is grouped by project and filtered to running sessions">
 </picture>
 
-<sub>All screenshots show made-up demo data, rendered with <code>make screenshots</code>.</sub>
+<sub>All screenshots and the demo use made-up data, rendered with <code>make screenshots</code>.</sub>
 
 </div>
 
@@ -88,13 +88,18 @@ away. Pick one and you're back in it.
 
 ### Know what's happening
 
-- **Live status.** A coral pulse means Claude is working. Green means the session is waiting
-  for you. **All | Running** (<kbd>⇥</kbd>) shows only the open sessions. The menu bar icon
+- **Needs you.** When Claude is blocked on a permission prompt or a question, the session moves
+  to a **Needs you** section at the top, with an amber dot and the reason, for example
+  "Permission to run Bash". The menu bar icon gets an amber dot too, so you can see it from any app.
+- **Live status.** A coral pulse means Claude is working, green means it's idle, and amber means
+  it needs you. **All | Running** (<kbd>⇥</kbd>) shows only the open sessions. The menu bar icon
   gets a dot while any session is working.
-- **A notification when Claude finishes.** When a turn that took longer than 20 seconds ends,
-  you get a notification with the start of Claude's reply. Clicking it takes you to that tab.
-  If that tab is already in front of you, there's no notification.
+- **Notifications.** You get one when Claude needs your input, and one when a turn that took
+  longer than 20 seconds ends. The second shows what the turn did, for example
+  *"4m 12s · 6 edits · +≈$0.84"*, and the start of Claude's reply. Clicking either takes you to
+  that tab. If that tab is already in front of you, there's no notification.
 - **Preview** (<kbd>→</kbd>). A side pane shows the session without resuming it:
+  - the last turn: how long it took, edits, tool errors and what it cost
   - Claude's latest recap and your last prompt
   - the start of Claude's last reply
   - the files it edited
@@ -102,7 +107,13 @@ away. Pick one and you're back in it.
   - prompt count, cost, tokens and models
 - **Merge requests and artifacts.** Pull or merge requests and published artifacts a session
   created appear as chips on the row. Click a chip to open it.
-- **Cost per session.** The API-equivalent cost at list prices, subagents included.
+- **Cost per session.** The API-equivalent cost at list prices, subagents included. Estimates
+  are marked `≈`. A figure without `≈` is Claude Code's own recorded total.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img src="docs/screenshot-light.png" width="840" alt="ClaudeResume panel with a session that needs permission on top, a pinned conversation, conversations grouped by day with branch, prompt count, age, estimated cost and merge request chips, and a preview pane showing the last turn, recap, links and Claude's last reply">
+</picture>
 
 ### Keep it tidy
 
@@ -213,7 +224,8 @@ ClaudeResume reads what Claude Code already keeps on disk:
 | Merge requests, artifacts | `pr-link` and `frame-link` entries |
 | Files changed | `Edit`, `Write`, `MultiEdit` and `NotebookEdit` tool calls |
 | Tokens, cost | `usage` blocks in the session and its `subagents/` transcripts, priced in `Pricing.swift` |
-| Running sessions, busy or idle | `~/.claude/sessions/<pid>.json`, checked every 3 seconds |
+| Running sessions: working, idle or needing you | `status` and `waitingFor` in `~/.claude/sessions/<pid>.json`, checked every 3 seconds |
+| The last turn | everything after your latest prompt, plus its `turn_duration` entry |
 | A session's iTerm2 tab | the process's terminal (`sysctl`), matched against each iTerm2 session's `tty` |
 | An app-launched Ghostty terminal | an inherited launch marker, mapped to Ghostty's surface ID |
 | Opening, focusing, closing tabs | native AppleScript to the session's terminal |
@@ -272,7 +284,7 @@ make test         # Swift Testing suite: parser, search, store, commands
 make run          # run from the terminal
 make dump         # print every session the app would list, with cost and links
 make app          # build build/ClaudeResume.app
-make screenshots  # re-render docs/screenshot-*.png from demo data
+make screenshots  # re-render docs/screenshot-*.png and docs/demo*.gif from demo data
 make icon         # regenerate Resources/AppIcon.icns
 ```
 
@@ -280,6 +292,7 @@ Some debugging commands:
 - `ClaudeResume --resume <id-prefix>` resumes or focuses a session without the UI.
 - `ClaudeResume --snapshot out.png [--demo] [--dark] [--preview] [--query text] [--group project]`
   renders the panel to an image.
+- `ClaudeResume --gif out.gif [--dark]` renders the animated demo.
 
 Tagging `vX.Y.Z` builds a universal binary and publishes a GitHub release. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for how the code is organised.

@@ -9,6 +9,10 @@ enum Main {
             Snapshot.run(to: path)
             return
         }
+        if let path = Snapshot.gifPath {
+            Snapshot.gif(to: path)
+            return
+        }
         if arguments.contains("--dump") {
             Debug.dump()
             return
@@ -79,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Status item
 
     private func observeBusyState() {
-        withObservationTracking { _ = store.anyBusy } onChange: { [weak self] in
+        withObservationTracking { _ = (store.anyBusy, store.waitingCount) } onChange: { [weak self] in
             DispatchQueue.main.async {
                 self?.updateIcon()
                 self?.observeBusyState()
@@ -88,8 +92,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateIcon() {
-        statusItem.button?.image = StatusIcon.render(badge: store.anyBusy)
-        statusItem.button?.toolTip = store.anyBusy ? "Claude is working" : "Claude conversations"
+        let waiting = store.waitingCount
+        statusItem.button?.image = StatusIcon.render(waiting > 0 ? .attention : store.anyBusy ? .busy : .none)
+        statusItem.button?.toolTip = waiting > 0
+            ? (waiting == 1 ? "A Claude session needs you" : "\(waiting) Claude sessions need you")
+            : store.anyBusy ? "Claude is working" : "Claude conversations"
     }
 
     // MARK: Panel
@@ -304,26 +311,33 @@ extension NSImage {
 
 /// The menu bar glyph: a speech bubble with a back arrow, plus a dot while a session is working.
 enum StatusIcon {
-    static func render(badge: Bool) -> NSImage {
+    enum Badge { case none, busy, attention }
+
+    /// A template image normally, so it follows the menu bar's appearance. With the amber
+    /// attention dot it can't be a template, so the glyph is drawn in the label colour instead.
+    static func render(_ badge: Badge) -> NSImage {
         let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
         let symbol = NSImage(systemSymbolName: "bubble.left.and.text.bubble.right", accessibilityDescription: nil)?
             .withSymbolConfiguration(config) ?? NSImage()
         let size = NSSize(width: 20, height: 18)
         let image = NSImage(size: size, flipped: false) { rect in
             let s = symbol.size
-            let origin = NSPoint(x: (rect.width - s.width) / 2, y: (rect.height - s.height) / 2)
-            symbol.draw(in: NSRect(origin: origin, size: s))
-            if badge {
-                let dot = NSRect(x: rect.maxX - 6, y: rect.maxY - 6, width: 6, height: 6)
-                NSGraphicsContext.current?.compositingOperation = .clear
-                NSBezierPath(ovalIn: dot.insetBy(dx: -1.5, dy: -1.5)).fill()
-                NSGraphicsContext.current?.compositingOperation = .sourceOver
-                NSColor.black.setFill()
-                NSBezierPath(ovalIn: dot).fill()
+            let glyph = NSRect(origin: NSPoint(x: (rect.width - s.width) / 2, y: (rect.height - s.height) / 2), size: s)
+            symbol.draw(in: glyph)
+            if badge == .attention {
+                NSColor.labelColor.set()
+                glyph.fill(using: .sourceAtop)
             }
+            guard badge != .none else { return true }
+            let dot = NSRect(x: rect.maxX - 6.5, y: rect.maxY - 6.5, width: 6.5, height: 6.5)
+            NSGraphicsContext.current?.compositingOperation = .clear
+            NSBezierPath(ovalIn: dot.insetBy(dx: -1.5, dy: -1.5)).fill()
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            (badge == .attention ? NSColor.systemOrange : NSColor.black).setFill()
+            NSBezierPath(ovalIn: dot).fill()
             return true
         }
-        image.isTemplate = true
+        image.isTemplate = badge != .attention
         return image
     }
 }
@@ -338,7 +352,7 @@ enum Debug {
             let status = live[session.id].map { "[\($0.status.rawValue)]" } ?? ""
             print("\(Fmt.age(session.lastActivity).padding(toLength: 7, withPad: " ", startingAt: 0)) \(session.id.prefix(8)) \(session.folderName) · \(session.branch ?? "-") · \(session.promptCount)p \(status)")
             print("        \(session.title)")
-            let cost = session.cost.map(Fmt.usd) ?? "-"
+            let cost = Fmt.cost(session) ?? "-"
             print("        \(cost) · \(Fmt.compact(session.tokens)) tokens · \(session.models.joined(separator: ", ")) · \(session.filesChanged.count) files · \(session.links.map(\.detail).joined(separator: ", "))")
             if let recap = session.recap { print("        recap: \(recap.prefix(110))") }
         }
