@@ -178,7 +178,7 @@ struct ListPane: View {
 
     @ViewBuilder
     private var content: some View {
-        let sections = store.sections
+        let sections = store.displayedSections
         if !store.isLoaded {
             ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if sections.isEmpty {
@@ -208,28 +208,33 @@ struct ListPane: View {
                 .onChange(of: sections.first?.sessions.first?.id) { _, first in
                     if let first { proxy.scrollTo(first, anchor: .bottom) }
                 }
+                .onChange(of: store.listResetID) { _, _ in
+                    if let first = sections.first?.sessions.first?.id { proxy.scrollTo(first, anchor: .top) }
+                }
             }
         }
     }
 
     private func rows(_ sections: [SessionSection]) -> some View {
-        let terms = Search.terms(store.query)
-        return ForEach(sections) { section in
+        ForEach(sections) { section in
             Section {
                 ForEach(section.sessions) { session in
-                    row(session, terms: terms)
+                    row(session)
+                        .onAppear {
+                            if !Snapshot.isActive { store.loadMoreIfNeeded(after: session.id) }
+                        }
                 }
             } header: {
-                SectionHeader(title: section.title, subtitle: section.subtitle, count: section.sessions.count)
+                SectionHeader(title: section.title, subtitle: section.subtitle, count: section.count)
             }
         }
     }
 
-    private func row(_ session: Session, terms: [String]) -> some View {
+    private func row(_ session: Session) -> some View {
         SessionRow(
             session: session,
             live: store.live[session.id],
-            highlights: terms.isEmpty ? [] : Search.match(session, terms: terms)?.titleRanges ?? [],
+            highlights: store.highlightRanges(for: session),
             isSelected: store.selection == session.id,
             isHovered: hovered == session.id,
             isPinned: store.pinned.contains(session.id),
@@ -273,7 +278,8 @@ struct ListPane: View {
             : store.visible.count
         let noun = count == 1 ? "conversation" : "conversations"
         let running = store.live.count
-        return running > 0 ? "\(count) \(noun) · \(running) running" : "\(count) \(noun)"
+        let total = store.hasMoreSessions ? "\(store.displayedCount) of \(count) \(noun)" : "\(count) \(noun)"
+        return running > 0 ? "\(total) · \(running) running" : total
     }
 }
 
