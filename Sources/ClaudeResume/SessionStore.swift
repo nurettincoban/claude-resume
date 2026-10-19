@@ -50,6 +50,10 @@ struct SessionSection: Identifiable, Equatable {
     let title: String
     var sessions: [Session]
     var subtitle: String?
+    /// The full section size when only the first rows are on screen.
+    var totalCount: Int?
+
+    var count: Int { totalCount ?? sessions.count }
 }
 
 /// A title set in ClaudeResume for a session that was running at the time. Claude Code keeps
@@ -64,28 +68,63 @@ private struct TitleOverride: Codable {
 @Observable
 final class SessionStore {
     static let shared = SessionStore()
+    /// Rows added to the list at a time. Search, grouping and keyboard navigation still see every session.
+    static let pageSize = 50
 
-    private(set) var sessions: [Session] = []
-    private(set) var live: [String: LiveSession] = [:]
+    private(set) var sessions: [Session] = [] { didSet { invalidateListing() } }
+    private(set) var live: [String: LiveSession] = [:] {
+        didSet {
+            // Only the Running filter and the Needs you section depend on live state.
+            if Self.waitingIds(live) != Self.waitingIds(oldValue)
+                || (filter == .running && Set(live.keys) != Set(oldValue.keys)) { invalidateListing() }
+        }
+    }
     private(set) var isLoaded = false
-    var query = "" { didSet { if query != oldValue { selectFirst() } } }
-    var filter: SessionFilter = .all { didSet { if filter != oldValue { selectFirst() } } }
+    var query = "" { didSet { if query != oldValue { resetListing() } } }
+    var filter: SessionFilter = .all { didSet { if filter != oldValue { resetListing() } } }
     /// Only show sessions from this folder.
-    var project: String? { didSet { if project != oldValue { selectFirst() } } }
+    var project: String? { didSet { if project != oldValue { resetListing() } } }
     var grouping: Grouping = Grouping(rawValue: UserDefaults.standard.string(forKey: Prefs.grouping) ?? "") ?? .date {
         didSet {
+            guard grouping != oldValue else { return }
             if persists { UserDefaults.standard.set(grouping.rawValue, forKey: Prefs.grouping) }
-            selectFirst()
+            resetListing()
         }
     }
     var showHidden = UserDefaults.standard.bool(forKey: Prefs.showHidden) {
-        didSet { if persists { UserDefaults.standard.set(showHidden, forKey: Prefs.showHidden) } }
+        didSet {
+            guard showHidden != oldValue else { return }
+            if persists { UserDefaults.standard.set(showHidden, forKey: Prefs.showHidden) }
+            resetListing()
+        }
     }
     var previewOpen = false
-    var selection: Session.ID?
+    var selection: Session.ID? { didSet { if selection != oldValue { revealSelection() } } }
     var error: String?
-    private(set) var pinned: Set<String> = Set(UserDefaults.standard.stringArray(forKey: Prefs.pinned) ?? [])
-    private(set) var hidden: Set<String> = Set(UserDefaults.standard.stringArray(forKey: Prefs.hidden) ?? [])
+    private(set) var pinned: Set<String> = Set(UserDefaults.standard.stringArray(forKey: Prefs.pinned) ?? []) {
+        didSet { invalidateListing() }
+    }
+    private(set) var hidden: Set<String> = Set(UserDefaults.standard.stringArray(forKey: Prefs.hidden) ?? []) {
+        didSet { invalidateListing() }
+    }
+
+    /// Bumped whenever the listing's inputs change, so views re-read the cached listing.
+    private var listingRevision = 0
+    /// Bumped when the list starts over from the top (new search, filter or grouping).
+    private(set) var listResetID = 0
+    private var displayLimit = SessionStore.pageSize
+    @ObservationIgnored private var cachedListing: Listing?
+    @ObservationIgnored private var cachedPage: (revision: Int, limit: Int, sections: [SessionSection])?
+
+    /// Search, filtering and grouping results, computed once per change instead of on every hover.
+    private struct Listing {
+        let day: Date
+        let sections: [SessionSection]
+        let sessions: [Session]
+        let indices: [String: Int]
+        let matches: [String: Search.Match]
+        let projects: [(path: String, name: String, count: Int)]
+    }
 
     /// Called before a session launches, so the panel can get out of the way.
     var onLaunch: (() -> Void)?
@@ -233,13 +272,87 @@ final class SessionStore {
 
     // MARK: Listing
 
-    var sections: [SessionSection] {
+    private var listing: Listing {
+        _ = listingRevision
+        // Date sections move at midnight even when nothing else changed.
+        let day = Calendar.current.startOfDay(for: Date())
+        if let cachedListing, cachedListing.day == day { return cachedListing }
+        var matches: [String: Search.Match] = [:]
+        let sections = makeSections(matches: &matches)
+        let ordered = sections.flatMap(\.sessions)
+        let indices = ordered.enumerated().reduce(into: [String: Int]()) { $0[$1.element.id] = $1.offset }
+        let result = Listing(day: day, sections: sections, sessions: ordered, indices: indices,
+                             matches: matches, projects: makeProjects())
+        cachedListing = result
+        cachedPage = nil
+        return result
+    }
+
+    private func invalidateListing(resetPage: Bool = false) {
+        cachedListing = nil
+        cachedPage = nil
+        listingRevision += 1
+        if resetPage { displayLimit = Self.pageSize }
+    }
+
+    private func resetListing() {
+        invalidateListing(resetPage: true)
+        listResetID += 1
+        selectFirst()
+    }
+
+    private static func waitingIds(_ live: [String: LiveSession]) -> Set<String> {
+        Set(live.filter { $0.value.status == .waiting }.keys)
+    }
+
+    var sections: [SessionSection] { listing.sections }
+
+    /// The sections cut to the rows loaded so far. Only these go into the list.
+    var displayedSections: [SessionSection] {
+        let current = listing
+        if let cachedPage, cachedPage.revision == listingRevision, cachedPage.limit == displayLimit {
+            return cachedPage.sections
+        }
+        var remaining = displayLimit
+        var page: [SessionSection] = []
+        for section in current.sections {
+            guard remaining > 0 else { break }
+            var partial = section
+            partial.totalCount = section.sessions.count
+            partial.sessions = Array(section.sessions.prefix(remaining))
+            remaining -= partial.sessions.count
+            page.append(partial)
+        }
+        cachedPage = (listingRevision, displayLimit, page)
+        return page
+    }
+
+    var displayedCount: Int { min(displayLimit, visible.count) }
+    var hasMoreSessions: Bool { displayedCount < visible.count }
+
+    /// Loads the next page once the last loaded row appears.
+    func loadMoreIfNeeded(after id: String) {
+        let current = listing.sessions
+        let count = min(displayLimit, current.count)
+        guard count > 0, count < current.count, current[count - 1].id == id else { return }
+        displayLimit += Self.pageSize
+    }
+
+    func highlightRanges(for session: Session) -> [Range<String.Index>] {
+        listing.matches[session.id]?.titleRanges ?? []
+    }
+
+    private func makeSections(matches: inout [String: Search.Match]) -> [SessionSection] {
         let terms = Search.terms(query)
         let base = scoped
         if !terms.isEmpty {
-            let matches = base.compactMap { session in Search.match(session, terms: terms).map { (session, $0.score) } }
+            let ranked = base.compactMap { session -> (Session, Double)? in
+                guard let match = Search.match(session, terms: terms) else { return nil }
+                matches[session.id] = match
+                return (session, match.score)
+            }
                 .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.lastActivity > $1.0.lastActivity }
-            return matches.isEmpty ? [] : [SessionSection(id: "results", title: "Results", sessions: matches.map(\.0))]
+            return ranked.isEmpty ? [] : [SessionSection(id: "results", title: "Results", sessions: ranked.map(\.0))]
         }
         // Sessions blocked on you come first, whatever the grouping.
         let waiting = base.filter { live[$0.id]?.status == .waiting }
@@ -268,7 +381,7 @@ final class SessionStore {
     }
 
     /// Sessions in display order, for keyboard navigation.
-    var visible: [Session] { sections.flatMap(\.sessions) }
+    var visible: [Session] { listing.sessions }
 
     /// Sessions after the Running, project and hidden filters, before search and grouping.
     private var scoped: [Session] {
@@ -280,7 +393,9 @@ final class SessionStore {
     }
 
     /// Folders with sessions, most recently used first.
-    var projects: [(path: String, name: String, count: Int)] {
+    var projects: [(path: String, name: String, count: Int)] { listing.projects }
+
+    private func makeProjects() -> [(path: String, name: String, count: Int)] {
         var order: [String] = [], counts: [String: Int] = [:]
         for session in sessions where showHidden || !hidden.contains(session.id) {
             guard let cwd = session.projectPath else { continue }
@@ -340,10 +455,17 @@ final class SessionStore {
         selection = visible.first?.id
     }
 
+    /// Loads enough pages to show the selection, e.g. after moving past the last loaded row.
+    private func revealSelection() {
+        guard let selection, let index = listing.indices[selection], index >= displayLimit else { return }
+        displayLimit = (index / Self.pageSize + 1) * Self.pageSize
+    }
+
     func moveSelection(by offset: Int) {
-        let list = visible
+        let current = listing
+        let list = current.sessions
         guard !list.isEmpty else { return }
-        let index = list.firstIndex { $0.id == selection } ?? (offset > 0 ? -1 : list.count)
+        let index = selection.flatMap { current.indices[$0] } ?? (offset > 0 ? -1 : list.count)
         selection = list[max(0, min(list.count - 1, index + offset))].id
     }
 
@@ -364,11 +486,12 @@ final class SessionStore {
 
     func toggleHidden(_ session: Session) {
         if hidden.remove(session.id) == nil {
+            // Read the order from before the hide, so the next row can take the selection.
+            let list = visible
             hidden.insert(session.id)
             pinned.remove(session.id)
             save(pinned, Prefs.pinned)
             if !showHidden, selection == session.id {
-                let list = visible
                 if let index = list.firstIndex(where: { $0.id == session.id }) {
                     selection = list.indices.contains(index + 1) ? list[index + 1].id : list.dropLast().last?.id
                 }

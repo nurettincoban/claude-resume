@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The list shows 50 conversations at a time and loads more as you scroll. Search, filters,
+  grouping and keyboard navigation still cover every conversation, and the footer reads
+  "50 of 320 conversations" until the rest are loaded.
+- Search and grouping results are computed once per change instead of on every hover or
+  selection, which keeps long lists responsive.
+
+### Fixed
+
+- Hiding the selected conversation moves the selection to the next one.
+
 ## [1.2.0] - 2026-10-19
 
 ### Added
